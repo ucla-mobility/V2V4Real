@@ -1,7 +1,7 @@
 # V2V4Real: A large-scale real-world dataset for Vehicle-to-Vehicle Cooperative Perception
 
-[![paper](https://img.shields.io/badge/arXiv-Paper-<COLOR>.svg)]()
-[![supplement](https://img.shields.io/badge/Supplementary-Material-red)]()
+[![paper](https://img.shields.io/badge/arXiv-Paper-<COLOR>.svg)](https://arxiv.org/pdf/2303.07601.pdf)
+[![supplement](https://img.shields.io/badge/Supplementary-Material-red)](https://arxiv.org/pdf/2303.07601.pdf)
 [![video](https://img.shields.io/badge/Video-Presentation-F9D371)]()
 
 
