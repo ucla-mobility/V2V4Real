@@ -46,7 +46,7 @@ conda install pytorch==1.12.0 torchvision==0.13.0 cudatoolkit=11.3 -c pytorch -c
 ```
 #### 3. spconv 2.x Installation
 ```shell
-pip install spconv-cu117
+pip install spconv-cu113
 ```
 #### 4. Install other dependencies
 ```shell

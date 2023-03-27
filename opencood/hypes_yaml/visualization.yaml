@@ -2,8 +2,8 @@
 name: visualization
 
 yaml_parser: "load_voxel_params"
-root_dir: '/home/runshengxu/project/OpenCDA/opv2x_data_dumping/train'
-validate_dir: '/media/runshengxu/easystore/kitti2opv2v/tmp'
+root_dir: '/data/v2vreal/train'
+validate_dir: '/data/v2vreal/test'
 
 train_params:
   batch_size: &batch_size 4
