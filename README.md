@@ -26,12 +26,12 @@ Supported by the [UCLA Mobility Lab](https://mobility-lab.seas.ucla.edu/).
 
 ## CodeBase Features
 - Support both simulation and real-world cooperative perception dataset
-    -[x]  V2V4Real
-    -[x]  OPV2V
+    - [x] V2V4Real
+    - [x] OPV2V
 - Multiple Tasks supported
-    -[x] 3D object detection
-    -[ ] Cooperative tracking
-    -[ ] Domain adaption
+    - [x] 3D object detection
+    - [ ] Cooperative tracking
+    - [ ] Domain adaption
 - SOTA model supported
     - [x] [Attentive Fusion [ICRA2022]](https://arxiv.org/abs/2109.07644)
     - [x] [Cooper [ICDCS]](https://arxiv.org/abs/1905.05265)
