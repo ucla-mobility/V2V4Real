@@ -41,9 +41,18 @@ Supported by the [UCLA Mobility Lab](https://mobility-lab.seas.ucla.edu/).
     - [x] [CoBEVT [CoRL2022]](https://arxiv.org/abs/2207.02202)
 
 ## Data Download
-Please check our [website](https://research.seas.ucla.edu/mobility-lab/v2v4real/) to download the data.
+Please check our [website](https://research.seas.ucla.edu/mobility-lab/v2v4real/) to download the data (OPV2V format).
 
+After downloading the data, please put the data in the following structure:
+```shell
+├── v2v4real
+│   ├── train
+|      |── testoutput_CAV_data_2022-03-15-09-54-40_1
+│   ├── validate
+│   ├── test
+```
 ## Changelog
+- Mar. 23, 2023: The codebase for 3D object detection is released
 - Mar. 19, 2023: The website is ready
 - Mar. 14, 2023: Tha paper is release
 
