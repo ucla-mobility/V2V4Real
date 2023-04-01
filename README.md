@@ -162,6 +162,7 @@ The evaluation results  will be dumped in the model directory.
 | V2VNet       | [1]      | 26.3   |     |
 | V2X-ViT      | [1]     | 39.5   |    | 
 | CoBEVT       | [1]      | **40.2**  |     |
+
 [1]: Yuhua Chen, Wen Li, Christos Sakaridis, Dengxin Dai, and
 Luc Van Gool. Domain adaptive faster r-cnn for object de-
 tection in the wild. In Proceedings of the IEEE conference on
