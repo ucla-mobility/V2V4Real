@@ -123,24 +123,28 @@ python opencood/tools/inference.py --model_dir ${CHECKPOINT_FOLDER} --fusion_met
 ```
 Arguments Explanation:
 - `model_dir`: the path to your saved model.
-- `fusion_method`: indicate the fusion strategy, currently support 'early', 'late', and 'intermediate'.
+- `fusion_method`: indicate the fusion strategy, currently support 'nofusion', 'early', 'late', and 'intermediate'.
 - `show_vis`: whether to visualize the detection overlay with point cloud.
 - `show_sequence` : the detection results will visualized in a video stream. It can NOT be set with `show_vis` at the same time.
 
 The evaluation results  will be dumped in the model directory.
 
+Important notes for testing:
+1. Remember to change the `validation_dir` in config.yaml under your checkpoint folder to the testing dataset path, e.g. `v2v4real/test`.
+2. To test under async mode, you need to set the `async_mode` in config.yaml to `True` and set the `async_overhead` to the desired delay time (default 100ms).
+
 ## Benchmark
 ### Results of Cooperative 3D object detection
 | Method        | Backbone    | Sync AP@0.5 | Sync AP@0.7 | Async AP@0.5 | Async AP@0.7 | Bandwidth | Download Link                                                            |
 |--------------|-------------|----------------|----------------|--------------|--------------|-----------|--------------------------------------------------------------------------|
-| No Fusion    | PointPillar | 39.8           | 22.0          | 39.8          | 22.0          |      0.0     |                                                                          |
-| Late Fusion  | PointPillar | 55.0           | 26.7       | 50.2        | 22.4         |      0.003     |                                                                          |
-| Early Fusion | PointPillar  | 59.7          | 32.1         | 52.1        | 25.8       |      0.96     |                                                                          |
-| [F-Cooper](https://arxiv.org/abs/1909.06459) | PointPillar | 60.7          | 31.8          | 53.6        | 26.7       |      0.20     |                                                                          |
-| [Attentive Fusion](https://arxiv.org/abs/2109.07644)     | PointPillar | 64.5         | 34.3          | 56.4         | 28.5      |     0.20      |                                                                          |
-| [V2VNet](https://arxiv.org/abs/2008.07519)         |PointPillar | 64.7         | 33.6           | 57.7        | 27.5     |     0.20      |                                                                          |
-| [V2X-ViT](https://arxiv.org/pdf/2203.10638.pdf)    | PointPillar | 64.9          | **36.9**           | 55.9       | 29.3       |   0.20        | 
-| [CoBEVT](https://arxiv.org/abs/2207.02202)      | PointPillar |    **66.5**     |  36.0   | **58.6**  | **29.7**  | 0.20| |
+| No Fusion    | PointPillar | 39.8           | 22.0          | 39.8          | 22.0          |      0.0     |    [url](https://drive.google.com/file/d/1spnCYEbzOiQaK4p9u9kD1K-hUCh6Me3-/view?usp=share_link)                                                                    |
+| Late Fusion  | PointPillar | 55.0           | 26.7       | 50.2        | 22.4         |      0.003     |      [url](https://drive.google.com/file/d/1spnCYEbzOiQaK4p9u9kD1K-hUCh6Me3-/view?usp=share_link)                                                                         |
+| Early Fusion | PointPillar  | 59.7          | 32.1         | 52.1        | 25.8       |      0.96     |       [url](https://drive.google.com/file/d/1v8aD_HyQnUddhGhZAlqAziLo43LwlOc0/view?usp=share_link)                       |
+| [F-Cooper](https://arxiv.org/abs/1909.06459) | PointPillar | 60.7          | 31.8          | 53.6        | 26.7       |      0.20     |     [url](https://drive.google.com/file/d/1znq2xSa3bYrKg_KsqA4Ax34sbYcZ7YBe/view?usp=share_link)                                                                     |
+| [Attentive Fusion](https://arxiv.org/abs/2109.07644)     | PointPillar | 64.5         | 34.3          | 56.4         | 28.5      |     0.20      |      [url](https://drive.google.com/file/d/1RudJFuJrKRwJpEVtEx-ZV05-yBj-HWlR/view?usp=share_link)                                                                    |
+| [V2VNet](https://arxiv.org/abs/2008.07519)         |PointPillar | 64.7         | 33.6           | 57.7        | 27.5     |     0.20      |     [url](https://drive.google.com/file/d/1MtkaUHT5_LdwWs73g034pATa1sUJxHaf/view?usp=share_link)                                                                      |
+| [V2X-ViT](https://arxiv.org/pdf/2203.10638.pdf)    | PointPillar | 64.9          | **36.9**           | 55.9       | 29.3       |   0.20        | [url](https://drive.google.com/file/d/1gtF_RHxhOLEAqhUVWaOlBJMLdUXFEIBb/view?usp=share_link)
+| [CoBEVT](https://arxiv.org/abs/2207.02202)      | PointPillar |    **66.5**     |  36.0   | **58.6**  | **29.7**  | 0.20| [url](https://drive.google.com/file/d/1aTpADzAYvseyHDstePakh5mKXrW1-zaz/view?usp=share_link)|
 
 ### Results of Cooperative tracking
 | Method       | AMOTA(↑) | AMOTP(↑) | sAMOTA(↑) | MOTA(↑)  | MT(↑)    | ML(↓)    |
