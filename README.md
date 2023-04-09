@@ -52,6 +52,7 @@ After downloading the data, please put the data in the following structure:
 │   ├── test
 ```
 ## Changelog
+- Apr. 08, 2023: Dateset and pretrained models are released
 - Mar. 23, 2023: The codebase for 3D object detection is released
 - Mar. 19, 2023: The website is ready
 - Mar. 14, 2023: Tha paper is release
