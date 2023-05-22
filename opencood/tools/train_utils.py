@@ -81,7 +81,7 @@ def setup_train(hypes):
     return full_path
 
 
-def create_model(hypes):
+def create_model(hypes, da=False):
     """
     Import the module "models/[model_name].py
 
@@ -89,6 +89,9 @@ def create_model(hypes):
     __________
     hypes : dict
         Dictionary containing parameters.
+
+    da : bool
+        If true, import the domain adaptation model.
 
     Returns
     -------
@@ -98,7 +101,8 @@ def create_model(hypes):
     backbone_name = hypes['model']['core_method']
     backbone_config = hypes['model']['args']
 
-    model_filename = "opencood.models." + backbone_name
+    model_filename = "opencood.models." + backbone_name if not da \
+        else "opencood.models.domain_adaptions." + backbone_name
     model_lib = importlib.import_module(model_filename)
     model = None
     target_model_name = backbone_name.replace('_', '')

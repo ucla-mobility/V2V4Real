@@ -245,3 +245,43 @@ class PointPillarLoss(nn.Module):
                           epoch*batch_len + batch_id)
         writer.add_scalar('Confidence_loss', conf_loss.item(),
                           epoch*batch_len + batch_id)
+
+    def logging_da(self, epoch, batch_id, batch_len, writer, da_loss, pbar=None):
+        """
+        Print out  the domain adaption loss function for current iteration.
+        This is only used on domain adaption track
+
+        Parameters
+        ----------
+        epoch : int
+            Current epoch for training.
+        batch_id : int
+            The current batch.
+        batch_len : int
+            Total batch length in one iteration of training,
+        writer : SummaryWriter
+            Used to visualize on tensorboard
+        """
+        total_loss = self.loss_dict['total_loss']
+        reg_loss = self.loss_dict['reg_loss']
+        conf_loss = self.loss_dict['conf_loss']
+        if pbar is None:
+            print("[epoch %d][%d/%d], || Loss: %.4f || Conf Loss: %.4f"
+                " || Loc Loss: %.4f" % (
+                    epoch, batch_id + 1, batch_len,
+                    total_loss.item(), conf_loss.item(), reg_loss.item()))
+        else:
+            pbar.set_description("[epoch %d][%d/%d], || Loss: %.4f || Conf Loss: %.4f"
+                  " || Loc Loss: %.4f || da_fea_loss: %.4f || da_ins_loss: %.4f" % (
+                      epoch, batch_id + 1, batch_len,
+                      total_loss.item(), conf_loss.item(), reg_loss.item(),
+                      da_loss['fea_loss'].item(), da_loss['ins_loss'].item()))
+        writer.add_scalar('Regression_loss', reg_loss.item(),
+                          epoch*batch_len + batch_id)
+        writer.add_scalar('Confidence_loss', conf_loss.item(),
+                          epoch*batch_len + batch_id)
+
+        writer.add_scalar('da_fea_loss', da_loss['fea_loss'].item(),
+                        epoch*batch_len + batch_id)
+        writer.add_scalar('da_ins_loss', da_loss['ins_loss'].item(),
+                        epoch*batch_len + batch_id)
