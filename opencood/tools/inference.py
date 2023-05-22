@@ -52,7 +52,7 @@ def main():
                                      isSim=opt.isSim)
     data_loader = DataLoader(opencood_dataset,
                              batch_size=1,
-                             num_workers=1,
+                             num_workers=16,
                              collate_fn=opencood_dataset.collate_batch_test,
                              shuffle=False,
                              pin_memory=False,

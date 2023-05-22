@@ -31,7 +31,7 @@ Supported by the [UCLA Mobility Lab](https://mobility-lab.seas.ucla.edu/).
 - Multiple Tasks supported
     - [x] 3D object detection
     - [ ] Cooperative tracking
-    - [ ] Domain adaption
+    - [x] Sim2Real
 - SOTA model supported
     - [x] [Attentive Fusion [ICRA2022]](https://arxiv.org/abs/2109.07644)
     - [x] [Cooper [ICDCS]](https://arxiv.org/abs/1905.05265)
@@ -52,6 +52,7 @@ After downloading the data, please put the data in the following structure:
 │   ├── test
 ```
 ## Changelog
+- Mar. 21, 2023: Sim2Real realted codebase and pretrained models are released
 - Apr. 08, 2023: Dateset and pretrained models are released
 - Mar. 23, 2023: The codebase for 3D object detection is released
 - Mar. 19, 2023: The website is ready
@@ -115,6 +116,14 @@ To train on **multiple gpus**, run the following command:
 ```
 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.launch --nproc_per_node=4  --use_env opencood/tools/train.py --hypes_yaml ${CONFIG_FILE} [--model_dir  ${CHECKPOINT_FOLDER}]
 ```
+
+### Train Sim2Real
+We provide `train_da.py` to train the sim2real models shown in the paper. The models will take the simulation data and 
+v2v4real data without gt labels as input, and compute the domain adaptation loss. To train the sim2real model, run the following command:
+```python
+python opencood/tools/train_da.py --hypes_yaml hypes_yaml/domain_adaptions/xxx.yaml [--model_dir  ${CHECKPOINT_FOLDER} --half
+```
+
 ### Test the model
 Before you run the following command, first make sure the `validation_dir` in config.yaml under your checkpoint folder
 refers to the testing dataset path, e.g. `v2v4real/test`.
@@ -133,6 +142,7 @@ The evaluation results  will be dumped in the model directory.
 Important notes for testing:
 1. Remember to change the `validation_dir` in config.yaml under your checkpoint folder to the testing dataset path, e.g. `v2v4real/test`.
 2. To test under async mode, you need to set the `async_mode` in config.yaml to `True` and set the `async_overhead` to the desired delay time (default 100ms).
+3. The testing script for cooperative 3D object detection and sim2real is the same
 
 ## Benchmark
 ### Results of Cooperative 3D object detection
@@ -162,11 +172,11 @@ Important notes for testing:
 ### Results of Domain Adaption
 | Method       | Domain Adaption | AP@0.5 | Download Link |
 |--------------|----------|----------|-----------
-| F-Cooper     | [1]   | 37.3   |     | 
-| AttFuse      | [1]      | 23.4   |     | 
-| V2VNet       | [1]      | 26.3   |     |
-| V2X-ViT      | [1]     | 39.5   |    | 
-| CoBEVT       | [1]      | **40.2**  |     |
+| F-Cooper     | [1]   | 37.3   |   [Download Link](https://drive.google.com/drive/folders/1IWuBEdxMyxdZ3y2f9H0BNw1YU2S-zvIn?usp=share_link)  | 
+| AttFuse      | [1]      | 23.4   |  [Download Link](https://drive.google.com/drive/folders/1t8h2Ir2t1WUZ2sP0OrY8H8TzCNpykPXL?usp=share_link)   | 
+| V2VNet       | [1]      | 26.3   | [Download Link](https://drive.google.com/drive/folders/1G1MLUnFAvy7vuCO21WVJGwUJlfU2tlAb?usp=share_link)    |
+| V2X-ViT      | [1]     | 39.5   |  [Download Link](https://drive.google.com/drive/folders/13iZcuc-F7N60Pr6W5Ks05Z6CO6xutvvZ?usp=share_link)  | 
+| CoBEVT       | [1]      | **40.2**  | [Download LInk](https://drive.google.com/drive/folders/1Oz0aAsdRktlfiaUf2tLz_toMVzeJvZ74?usp=share_link)    |
 
 [1]: Yuhua Chen, Wen Li, Christos Sakaridis, Dengxin Dai, and
 Luc Van Gool. Domain adaptive faster r-cnn for object de-

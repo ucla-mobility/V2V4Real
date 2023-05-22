@@ -1,0 +1,1 @@
+# this folder is only for models with domain adaptions
