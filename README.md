@@ -36,7 +36,7 @@ Supported by the [UCLA Mobility Lab](https://mobility-lab.seas.ucla.edu/).
     - [x] [Attentive Fusion [ICRA2022]](https://arxiv.org/abs/2109.07644)
     - [x] [Cooper [ICDCS]](https://arxiv.org/abs/1905.05265)
     - [x] [F-Cooper [SEC2019]](https://arxiv.org/abs/1909.06459)
-    - [x] [V2VNet [ECCV2022]](https://arxiv.org/abs/2008.07519)
+    - [x] [V2VNet [ECCV2020]](https://arxiv.org/abs/2008.07519)
     - [x] [V2X-ViT [ECCV2022]](https://github.com/DerrickXuNu/v2x-vit)
     - [x] [CoBEVT [CoRL2022]](https://arxiv.org/abs/2207.02202)
 
