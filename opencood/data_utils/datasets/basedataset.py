@@ -149,11 +149,13 @@ class BaseDataset(Dataset):
                 cav_path = os.path.join(scenario_folder, cav_id)
 
                 # use the frame number as key, the full path as the values
-                # todo: hardcoded to remove additional yaml
+                # todo: hardcoded to remove additional yamls. no need to worry
+                # about this for users.
                 yaml_files = \
                     sorted([os.path.join(cav_path, x)
                             for x in os.listdir(cav_path) if
-                            x.endswith('.yaml') and 'additional' not in x])
+                            x.endswith('.yaml') and 'additional' \
+                            not in x and 'camera_gt' not in x])
                 timestamps = self.extract_timestamps(yaml_files)
 
                 for timestamp in timestamps:
