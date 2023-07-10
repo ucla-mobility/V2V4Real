@@ -51,7 +51,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                 if not isinstance(rot_range, list):
                     rot_range = [-rot_range, rot_range]
                 noise_rotation = np.random.uniform(rot_range[0],
-                                                        rot_range[1])
+                                                   rot_range[1])
 
             if 'random_world_flip' in aug_ele['NAME']:
                 for i, cur_axis in enumerate(aug_ele['ALONG_AXIS_LIST']):
@@ -110,7 +110,8 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
             projected_lidar_stack = []
 
         # loop over all CAVs to process information
-        for i, (cav_id, selected_cav_base) in enumerate(base_data_dict.items()):
+        for i, (cav_id, selected_cav_base) in enumerate(
+                base_data_dict.items()):
             # check if the cav is within the communication range with ego
             distance = dist_two_pose(selected_cav_base['params']['lidar_pose'],
                                      ego_lidar_pose)
@@ -130,7 +131,6 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
             if void_lidar:
                 continue
 
-
             object_stack.append(selected_cav_processed['object_bbx_center'])
             object_id_stack += selected_cav_processed['object_ids']
             processed_features.append(
@@ -146,7 +146,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                 projected_lidar = selected_cav_processed['projected_lidar']
                 projected_lidar = \
                     np.r_[projected_lidar.T,
-                          [np.ones(projected_lidar.shape[0])*i]].T
+                          [np.ones(projected_lidar.shape[0]) * i]].T
 
                 projected_lidar_stack.append(projected_lidar)
 
@@ -229,10 +229,13 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
         transformation_matrix = \
             selected_cav_base['params']['transformation_matrix']
 
+        isSim = selected_cav_base['sim_bool'] \
+            if self.mixed_train else self.isSim
+
         # retrieve objects under ego coordinates
         object_bbx_center, object_bbx_mask, object_ids = \
             self.post_processor.generate_object_center([selected_cav_base],
-                                                       transformation_matrix if not self.isSim else ego_pose)
+                                                       transformation_matrix if not isSim else ego_pose)
 
         # filter lidar
         lidar_np = selected_cav_base['lidar_np']
@@ -261,7 +264,8 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
             box_utils.mask_boxes_outside_range_numpy(object_bbx_center_valid,
                                                      self.params['preprocess'][
                                                          'cav_lidar_range'],
-                                                     self.params['postprocess'][
+                                                     self.params[
+                                                         'postprocess'][
                                                          'order'])
         object_ids = [int(x) for x in list(np.array(object_ids)[range_mask])]
         processed_lidar = self.pre_processor.preprocess(lidar_np)

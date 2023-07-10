@@ -66,7 +66,7 @@ def main():
     # domain adaption module
     DA_module = DomainAdaptationModule(hypes['model']['args'])
     #####################################################################
-    # DA_Component: dataloader for source and target domain
+    # DA_Component: dataloader for real world validation
     #####################################################################
     opencood_validate_dataset = build_dataset(hypes,
                                               visualize=False,

@@ -46,6 +46,10 @@ class BaseDataset(Dataset):
         self.visualize = visualize
         self.train = train
         self.isSim = isSim
+        # whether to use mixed dataset including both real and sim
+        self.mixed_train = False
+        # Boolean list to indicate whether the scenario is sim or real
+        self.sim_bool_list = []
 
         self.pre_processor = None
         self.post_processor = None
@@ -98,6 +102,20 @@ class BaseDataset(Dataset):
         self.scenario_folders = sorted([os.path.join(root_dir, x)
                                    for x in os.listdir(root_dir) if
                                    os.path.isdir(os.path.join(root_dir, x))])
+        # if mixed dataset is used, add the mixed dataset to the end of the
+        if self.train and 'root_dir_mixed' in params and params['mixed_train']:
+            root_dir_mixed = params['root_dir_mixed']
+            mixed_folder = sorted([os.path.join(root_dir_mixed, x)
+                                             for x in os.listdir(root_dir_mixed) if
+                                             os.path.isdir(os.path.join(root_dir_mixed, x))])
+            mixed_folder *= len(self.scenario_folders) // len(mixed_folder) + 1
+
+            self.sim_bool_list += [False] * len(self.scenario_folders)
+            self.scenario_folders += mixed_folder
+            self.sim_bool_list += [True] * len(mixed_folder)
+
+            self.mixed_train = True
+
         self.reinitialize()
 
     def __len__(self):
@@ -255,6 +273,11 @@ class BaseDataset(Dataset):
                 cav_content[timestamp_key_delay]['lidar'].split('/')[-3]
             data[cav_id]['index'] = timestamp_index
             data[cav_id]['cav_id'] = int(cav_id)
+
+            # if mixed training set to true
+            if self.mixed_train and self.sim_bool_list:
+                data[cav_id]['sim_bool'] = self.sim_bool_list[scenario_index]
+
         return data
 
     @staticmethod
