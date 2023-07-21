@@ -110,9 +110,9 @@ class BaseDataset(Dataset):
                                              os.path.isdir(os.path.join(root_dir_mixed, x))])
             mixed_folder *= len(self.scenario_folders) // len(mixed_folder) + 1
 
-            self.sim_bool_list += [False] * len(self.scenario_folders)
+            self.sim_bool_list += [True] * len(self.scenario_folders)
             self.scenario_folders += mixed_folder
-            self.sim_bool_list += [True] * len(mixed_folder)
+            self.sim_bool_list += [False] * len(mixed_folder)
 
             self.mixed_train = True
 
