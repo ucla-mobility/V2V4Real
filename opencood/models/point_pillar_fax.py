@@ -15,7 +15,7 @@ from opencood.models.sub_modules.fuse_utils import regroup
 class PointPillarFax(nn.Module):
     def __init__(self, args):
         super(PointPillarFax, self).__init__()
-
+        self.args = args
         self.max_cav = args['max_cav']
         # PIllar VFE
         self.pillar_vfe = PillarVFE(args['pillar_vfe'],
