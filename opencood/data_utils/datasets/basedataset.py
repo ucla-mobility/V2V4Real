@@ -108,7 +108,11 @@ class BaseDataset(Dataset):
             mixed_folder = sorted([os.path.join(root_dir_mixed, x)
                                              for x in os.listdir(root_dir_mixed) if
                                              os.path.isdir(os.path.join(root_dir_mixed, x))])
-            mixed_folder *= len(self.scenario_folders) // len(mixed_folder) + 1
+            if 'mixed_ratio' in params:
+                mixed_folder = mixed_folder * params['mixed_ratio']
+            else:
+                mixed_folder *= len(self.scenario_folders) // \
+                                len(mixed_folder) + 1
 
             self.sim_bool_list += [True] * len(self.scenario_folders)
             self.scenario_folders += mixed_folder
