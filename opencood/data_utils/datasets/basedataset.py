@@ -109,7 +109,7 @@ class BaseDataset(Dataset):
                                              for x in os.listdir(root_dir_mixed) if
                                              os.path.isdir(os.path.join(root_dir_mixed, x))])
             if 'mixed_ratio' in params:
-                mixed_folder = mixed_folder * params['mixed_ratio']
+                mixed_folder *= params['mixed_ratio']
             else:
                 mixed_folder *= len(self.scenario_folders) // \
                                 len(mixed_folder) + 1

@@ -42,33 +42,36 @@ class PointPillarFax(nn.Module):
         self.reg_head = nn.Conv2d(128 * 2, 7 * args['anchor_number'],
                                   kernel_size=1)
 
-        if args['backbone_fix']:
-            self.backbone_fix()
+        self.backbone_fix()
 
     def backbone_fix(self):
         """
         Fix the parameters of backbone during finetune on timedelay。
         """
-        for p in self.pillar_vfe.parameters():
-            p.requires_grad = False
-
-        for p in self.scatter.parameters():
-            p.requires_grad = False
-
-        for p in self.backbone.parameters():
-            p.requires_grad = False
-
-        if self.compression:
-            for p in self.naive_compressor.parameters():
-                p.requires_grad = False
-        if self.shrink_flag:
-            for p in self.shrink_conv.parameters():
+        if "backbone_fix" in self.args and self.args["backbone_fix"]:
+            for p in self.pillar_vfe.parameters():
                 p.requires_grad = False
 
-        for p in self.cls_head.parameters():
-            p.requires_grad = False
-        for p in self.reg_head.parameters():
-            p.requires_grad = False
+            for p in self.scatter.parameters():
+                p.requires_grad = False
+
+            for p in self.backbone.parameters():
+                p.requires_grad = False
+
+            if self.compression:
+                for p in self.naive_compressor.parameters():
+                    p.requires_grad = False
+            if self.shrink_flag:
+                for p in self.shrink_conv.parameters():
+                    p.requires_grad = False
+        if "fusion_fix" in self.args and self.args["fusion_fix"]:
+            for p in self.fusion_net.parameters():
+                p.requires_grad = False
+        if "decoder_fix" in self.args and self.args["decoder_fix"]:
+            for p in self.cls_head.parameters():
+                p.requires_grad = False
+            for p in self.reg_head.parameters():
+                p.requires_grad = False
 
     def forward(self, data_dict):
         voxel_features = data_dict['processed_lidar']['voxel_features']
