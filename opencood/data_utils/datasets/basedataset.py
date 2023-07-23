@@ -406,6 +406,8 @@ class BaseDataset(Dataset):
         ryp_std : float
             std of the gaussian noise
         """
+        if not isinstance(pose, list):
+            return pose
         if not self.train:
             np.random.seed(self.seed)
         xyz_noise = np.random.normal(0, xyz_std, 3)
