@@ -250,3 +250,4 @@ def to_device(inputs, device):
                 or isinstance(inputs, str):
             return inputs
         return inputs.to(device)
+
