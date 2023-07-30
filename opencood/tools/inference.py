@@ -1,7 +1,7 @@
 import argparse
 import os
 import time
-
+import statistics
 import torch
 import open3d as o3d
 from torch.utils.data import DataLoader
@@ -97,12 +97,13 @@ def main():
         for _ in range(500):
             vis_aabbs_gt.append(o3d.geometry.TriangleMesh())
             vis_aabbs_pred.append(o3d.geometry.TriangleMesh())
-
+    time_cost = []
     for i, batch_data in enumerate(data_loader):
         print(i)
         with torch.no_grad():
             torch.cuda.synchronize()
             batch_data = train_utils.to_device(batch_data, device)
+            start_time = time.time()
             if opt.fusion_method == 'nofusion':
                 pred_box_tensor, pred_score, gt_box_tensor = \
                     infrence_utils.inference_no_fusion(batch_data,
@@ -126,6 +127,9 @@ def main():
             else:
                 raise NotImplementedError('Only early, late and intermediate'
                                           'fusion is supported.')
+            end_time = time.time()
+            inference_time = end_time - start_time
+            time_cost.append(inference_time)
             # overall calculating
             eval_utils.caluclate_tp_fp(pred_box_tensor,
                                        pred_score,
@@ -243,7 +247,7 @@ def main():
                 vis.poll_events()
                 vis.update_renderer()
                 time.sleep(0.001)
-
+    print("mean time cost: ", statistics.mean(time_cost[100:]))
     eval_utils.eval_final_results(result_stat,
                                   opt.model_dir)
     eval_utils.eval_final_results(result_stat_short,
