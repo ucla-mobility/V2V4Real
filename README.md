@@ -52,11 +52,12 @@ After downloading the data, please put the data in the following structure:
 │   ├── test
 ```
 ## Changelog
-- Mar. 21, 2023: Sim2Real realted codebase and pretrained models are released
-- Apr. 08, 2023: Dateset and pretrained models are released
+- Oct. 22, 2023: Kitti format data is released [google drive](https://drive.google.com/drive/folders/10mZ_Cr3MImBktyFfB0yao-1pgKlXuOco?usp=share_link)
+- Mar. 21, 2023: Sim2Real related codebase and pre-trained models are released
+- Apr. 08, 2023: Dateset and pre-trained models are released
 - Mar. 23, 2023: The codebase for 3D object detection is released
 - Mar. 19, 2023: The website is ready
-- Mar. 14, 2023: Tha paper is release
+- Mar. 14, 2023: Tha paper is released
 
 ## Devkit setup
 V2V4Real's codebase is build upon [OpenCOOD](https://github.com/DerrickXuNu/OpenCOOD). Compared to OpenCOOD, this codebase supports both the simulation and real-world data and more perception tasks. Furthermore, this repo provides augmentations that OpenCOOD does not support. We highly recommend you to use this codebase to train your model on V2V4Real dataset
