@@ -1,0 +1,18 @@
+# ------------------- General Options -------------------------
+description                  : DMSTrack
+seed                         : 0
+
+# --------------- main.py
+save_root                    : ./results/v2v4real
+dataset                      : v2v4real      # v2v4real
+split                        : val        
+det_name                     : multi_sensor_differentiable_kalman_filter
+cat_list                     : ['Car']
+
+score_threshold              : -10000     # filter out tracklet with low confidence if necessary, default no filtering here but do it in trk_conf_threshold.py
+num_hypo                     : 1          # >1 to allow multi-hypothesis tracking
+
+# --------------- model.py
+ego_com                      : false      # turn on only slightly reduce speed but increase a lot for performance
+vis                          : false       # only for debug or visualization purpose, will significantly reduce speed
+affi_pro                     : false

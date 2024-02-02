@@ -1,0 +1,12 @@
+#!/bin/bash
+ 
+module load anaconda3
+conda activate
+
+cd ../
+source psc_init_env.sh
+
+mkdir results/v2v4real;  
+mkdir results/v2v4real/bev_loss_r1a0d0_subseq_n1_backprop_10; 
+
+python3 main_dkf.py --dataset v2v4real --det_name multi_sensor_differentiable_kalman_filter --num_frames_backprop 10 --num_frames_per_sub_seq -1 --num_epochs 10  --use_multiple_nets --seq_eval_mode all --run_evaluation_every_epoch  --training_split train --evaluation_split val --regression_loss_weight 1 --association_loss_weight 0 --det_neg_log_likelihood_loss_weight 0 --feature bev --save_dir_prefix bev_loss_r1a0d0_subseq_n1_backprop_10

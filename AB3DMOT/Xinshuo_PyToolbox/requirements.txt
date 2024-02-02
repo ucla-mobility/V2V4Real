@@ -1,0 +1,16 @@
+glob2
+pillow
+scikit-learn
+scikit-image
+scikit-video
+opencv-python
+matplotlib
+terminaltables
+
+#humanize
+#seaborn
+#tabulate
+#graphviz
+#open3d-python
+#h5py
+#trimesh

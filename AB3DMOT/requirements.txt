@@ -1,0 +1,11 @@
+wheel==0.37.1
+scikit-learn==0.19.2
+filterpy==1.4.5
+numba==0.56.2
+matplotlib==2.2.3
+pillow>=8.3.2
+opencv-python==4.2.0.32
+glob2==0.6
+PyYAML==5.4
+easydict==1.9
+llvmlite==0.39.1 			
