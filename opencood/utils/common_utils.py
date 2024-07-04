@@ -156,7 +156,22 @@ def convert_format(boxes_array):
                 boxes_array]
     return np.array(polygons)
 
-
+def convert_to_float32(output_dict):
+    """
+     Convert  torch tensor dict to dtype float32.
+    Args:
+        output_dict (dict):  tensor dict.
+    Returns:
+        dict: tensro dict with dtype float32.
+    """
+    float32_dict = {}
+    for key, value in output_dict.items():
+        if isinstance(value, torch.Tensor):
+            float32_dict[key] = value.float()
+        else:
+            float32_dict[key] = value
+    return float32_dict
+    
 def torch_tensor_to_numpy(torch_tensor):
     """
     Convert a torch tensor to numpy.
