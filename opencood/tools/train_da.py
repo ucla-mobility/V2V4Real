@@ -11,7 +11,7 @@ import opencood.hypes_yaml.yaml_utils as yaml_utils
 from opencood.tools import train_utils
 from opencood.data_utils.datasets import build_dataset
 from opencood.models.domain_adaptions.da_module import DomainAdaptationModule
-
+from opencood.utils.common_utils import convert_to_float32
 
 def train_parser():
     parser = argparse.ArgumentParser(description="synthetic data generation")
@@ -181,6 +181,8 @@ def main():
                     final_loss = criterion(ouput_dict,
                                            source_batch_data['ego'][
                                                'label_dict'])
+                ouput_dict = convert_to_float32(ouput_dict)
+
 
             ####DA Loss#####
             da_loss = DA_module(ouput_dict)
