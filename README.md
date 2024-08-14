@@ -149,14 +149,14 @@ Important notes for testing:
 ### Results of Cooperative 3D object detection
 | Method        | Backbone    | Sync AP@0.5 | Sync AP@0.7 | Async AP@0.5 | Async AP@0.7 | Bandwidth | Download Link                                                            |
 |--------------|-------------|----------------|----------------|--------------|--------------|-----------|--------------------------------------------------------------------------|
-| No Fusion    | PointPillar | 39.8           | 22.0          | 39.8          | 22.0          |      0.0     |    [url](https://drive.google.com/file/d/1spnCYEbzOiQaK4p9u9kD1K-hUCh6Me3-/view?usp=share_link)                                                                    |
-| Late Fusion  | PointPillar | 55.0           | 26.7       | 50.2        | 22.4         |      0.003     |      [url](https://drive.google.com/file/d/1spnCYEbzOiQaK4p9u9kD1K-hUCh6Me3-/view?usp=share_link)                                                                         |
-| Early Fusion | PointPillar  | 59.7          | 32.1         | 52.1        | 25.8       |      0.96     |       [url](https://drive.google.com/file/d/1v8aD_HyQnUddhGhZAlqAziLo43LwlOc0/view?usp=share_link)                       |
-| [F-Cooper](https://arxiv.org/abs/1909.06459) | PointPillar | 60.7          | 31.8          | 53.6        | 26.7       |      0.20     |     [url](https://drive.google.com/file/d/1znq2xSa3bYrKg_KsqA4Ax34sbYcZ7YBe/view?usp=share_link)                                                                     |
-| [Attentive Fusion](https://arxiv.org/abs/2109.07644)     | PointPillar | 64.5         | 34.3          | 56.4         | 28.5      |     0.20      |      [url](https://drive.google.com/file/d/1RudJFuJrKRwJpEVtEx-ZV05-yBj-HWlR/view?usp=share_link)                                                                    |
-| [V2VNet](https://arxiv.org/abs/2008.07519)         |PointPillar | 64.7         | 33.6           | 57.7        | 27.5     |     0.20      |     [url](https://drive.google.com/file/d/1MtkaUHT5_LdwWs73g034pATa1sUJxHaf/view?usp=share_link)                                                                      |
-| [V2X-ViT](https://arxiv.org/pdf/2203.10638.pdf)    | PointPillar | 64.9          | **36.9**           | 55.9       | 29.3       |   0.20        | [url](https://drive.google.com/file/d/1gtF_RHxhOLEAqhUVWaOlBJMLdUXFEIBb/view?usp=share_link)
-| [CoBEVT](https://arxiv.org/abs/2207.02202)      | PointPillar |    **66.5**     |  36.0   | **58.6**  | **29.7**  | 0.20| [url](https://drive.google.com/file/d/1aTpADzAYvseyHDstePakh5mKXrW1-zaz/view?usp=share_link)|
+| No Fusion    | PointPillar | 39.8           | 22.0          | 39.8          | 22.0          |      0.0     |    [url](https://ucla.app.box.com/v/UCLA-MobilityLab-V2V4REAL/file/1619899319493)                                                                |
+| Late Fusion  | PointPillar | 55.0           | 26.7       | 50.2        | 22.4         |      0.003     |        [url](https://ucla.app.box.com/v/UCLA-MobilityLab-V2V4REAL/file/1619899319493)                                                                  |
+| Early Fusion | PointPillar  | 59.7          | 32.1         | 52.1        | 25.8       |      0.96     |         [url](https://ucla.app.box.com/v/UCLA-MobilityLab-V2V4REAL/file/1619904736644)              |
+| [F-Cooper](https://arxiv.org/abs/1909.06459) | PointPillar | 60.7          | 31.8          | 53.6        | 26.7       |      0.20     |     [url](https://ucla.app.box.com/v/UCLA-MobilityLab-V2V4REAL/file/1619904126201)                                                                    |
+| [Attentive Fusion](https://arxiv.org/abs/2109.07644)     | PointPillar | 64.5         | 34.3          | 56.4         | 28.5      |     0.20      |      [url](https://ucla.app.box.com/v/UCLA-MobilityLab-V2V4REAL/file/1619906517230)                                                       |
+| [V2VNet](https://arxiv.org/abs/2008.07519)         |PointPillar | 64.7         | 33.6           | 57.7        | 27.5     |     0.20      |     [url](https://ucla.app.box.com/v/UCLA-MobilityLab-V2V4REAL/file/1619896948709)                                                                  |
+| [V2X-ViT](https://arxiv.org/pdf/2203.10638.pdf)    | PointPillar | 64.9          | **36.9**           | 55.9       | 29.3       |   0.20        | [url](https://ucla.app.box.com/v/UCLA-MobilityLab-V2V4REAL/file/1619911355608)
+| [CoBEVT](https://arxiv.org/abs/2207.02202)      | PointPillar |    **66.5**     |  36.0   | **58.6**  | **29.7**  | 0.20| [url](https://ucla.app.box.com/v/UCLA-MobilityLab-V2V4REAL/file/1619912313471)|
 
 ### Results of Cooperative tracking
 | Method       | AMOTA(↑) | AMOTP(↑) | sAMOTA(↑) | MOTA(↑)  | MT(↑)    | ML(↓)    |
@@ -173,11 +173,11 @@ Important notes for testing:
 ### Results of Domain Adaption
 | Method       | Domain Adaption | AP@0.5 | Download Link |
 |--------------|----------|----------|-----------
-| F-Cooper     | [1]   | 37.3   |   [Download Link](https://drive.google.com/drive/folders/1IWuBEdxMyxdZ3y2f9H0BNw1YU2S-zvIn?usp=share_link)  | 
-| AttFuse      | [1]      | 23.4   |  [Download Link](https://drive.google.com/drive/folders/1t8h2Ir2t1WUZ2sP0OrY8H8TzCNpykPXL?usp=share_link)   | 
-| V2VNet       | [1]      | 26.3   | [Download Link](https://drive.google.com/drive/folders/1G1MLUnFAvy7vuCO21WVJGwUJlfU2tlAb?usp=share_link)    |
-| V2X-ViT      | [1]     | 39.5   |  [Download Link](https://drive.google.com/drive/folders/13iZcuc-F7N60Pr6W5Ks05Z6CO6xutvvZ?usp=share_link)  | 
-| CoBEVT       | [1]      | **40.2**  | [Download LInk](https://drive.google.com/drive/folders/1Oz0aAsdRktlfiaUf2tLz_toMVzeJvZ74?usp=share_link)    |
+| F-Cooper     | [1]   | 37.3   |   [Download Link](https://ucla.app.box.com/v/UCLA-MobilityLab-V2V4REAL/folder/279924385524)  | 
+| AttFuse      | [1]      | 23.4   |  [Download Link](https://ucla.app.box.com/v/UCLA-MobilityLab-V2V4REAL/folder/279923915754)   | 
+| V2VNet       | [1]      | 26.3   | [Download Link](https://ucla.app.box.com/v/UCLA-MobilityLab-V2V4REAL/folder/279922383820)   |
+| V2X-ViT      | [1]     | 39.5   |  [Download Link](https://ucla.app.box.com/v/UCLA-MobilityLab-V2V4REAL/folder/279924578215)  | 
+| CoBEVT       | [1]      | **40.2**  | [Download LInk](https://ucla.app.box.com/v/UCLA-MobilityLab-V2V4REAL/folder/279923471991)   |
 
 [1]: Yuhua Chen, Wen Li, Christos Sakaridis, Dengxin Dai, and
 Luc Van Gool. Domain adaptive faster r-cnn for object de-
