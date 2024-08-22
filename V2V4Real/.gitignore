@@ -1,0 +1,14 @@
+*egg*
+*.idea*
+scripts/.ipynb_checkpoints/
+*.pyc
+*pycache*
+*__pycache__*
+*.py[cod]
+*$py.class
+*.so
+build/
+opencood/utils/box_overlaps.cpython-37m-x86_64-linux-gnu.so
+opencood/utils/box_overlaps.c
+opencood/logs/
+

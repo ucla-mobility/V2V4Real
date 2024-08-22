@@ -1,0 +1,166 @@
+data_augment:
+- ALONG_AXIS_LIST:
+  - x
+  NAME: random_world_flip
+- NAME: random_world_rotation
+  WORLD_ROT_ANGLE:
+  - -0.78539816
+  - 0.78539816
+- NAME: random_world_scaling
+  WORLD_SCALE_RANGE:
+  - 0.95
+  - 1.05
+fusion:
+  args: []
+  core_method: LateFusionDataset
+loss:
+  args:
+    cls_weight: 1.0
+    reg: 2.0
+  core_method: point_pillar_loss
+lr_scheduler:
+  core_method: cosineannealwarm
+  epoches: 60
+  lr_min: 2.0e-05
+  warmup_epoches: 10
+  warmup_lr: 0.0002
+model:
+  args:
+    anchor_num: 2
+    anchor_number: 2
+    base_bev_backbone:
+      layer_nums:
+      - 3
+      - 5
+      - 8
+      layer_strides:
+      - 2
+      - 2
+      - 2
+      num_filters:
+      - 64
+      - 128
+      - 256
+      num_upsample_filter:
+      - 128
+      - 128
+      - 128
+      upsample_strides:
+      - 1
+      - 2
+      - 4
+    cls_head_dim: 256
+    lidar_range: &id001
+    - -70.4
+    - -40
+    - -5
+    - 70.4
+    - 40
+    - 3
+    pillar_vfe:
+      num_filters:
+      - 64
+      use_absolute_xyz: true
+      use_norm: true
+      with_distance: false
+    point_pillar_scatter:
+      grid_size: !!python/object/apply:numpy.core.multiarray._reconstruct
+        args:
+        - !!python/name:numpy.ndarray ''
+        - !!python/tuple
+          - 0
+        - !!binary |
+          Yg==
+        state: !!python/tuple
+        - 1
+        - !!python/tuple
+          - 3
+        - !!python/object/apply:numpy.dtype
+          args:
+          - i8
+          - false
+          - true
+          state: !!python/tuple
+          - 3
+          - <
+          - null
+          - null
+          - null
+          - -1
+          - -1
+          - 0
+        - false
+        - !!binary |
+          YAEAAAAAAADIAAAAAAAAAAEAAAAAAAAA
+      num_features: 64
+    shrink_header:
+      dim:
+      - 256
+      input_dim: 384
+      kernal_size:
+      - 3
+      padding:
+      - 1
+      stride:
+      - 2
+    voxel_size: &id002
+    - 0.4
+    - 0.4
+    - 8
+  core_method: point_pillar
+name: point_pillar_late_fusion
+optimizer:
+  args:
+    eps: 1.0e-10
+    weight_decay: 0.0001
+  core_method: Adam
+  lr: 0.002
+postprocess:
+  dkf_feature_size: 5
+  anchor_args:
+    D: 1
+    H: 200
+    W: 352
+    cav_lidar_range: *id001
+    feature_stride: 4
+    h: 1.56
+    l: 3.9
+    num: 2
+    r:
+    - 0
+    - 90
+    vd: 8
+    vh: 0.4
+    vw: 0.4
+    w: 1.6
+  core_method: VoxelPostprocessor
+  max_num: 100
+  nms_thresh: 0.15
+  order: hwl
+  target_args:
+    neg_threshold: 0.45
+    pos_threshold: 0.6
+    score_threshold: 0.2
+preprocess:
+  args:
+    max_points_per_voxel: 32
+    max_voxel_test: 40000
+    max_voxel_train: 16000
+    voxel_size: *id002
+  cav_lidar_range: *id001
+  core_method: SpVoxelPreprocessor
+root_dir: ./data/train
+train_params:
+  batch_size: 8
+  epoches: 60
+  eval_freq: 1
+  save_freq: 1
+validate_dir: ./data/test
+wild_setting:
+  async: false
+  async_overhead: 100
+  loc_err: false
+  ryp_std: 0.2
+  seed: 20
+  xyz_std: 0.2
+yaml_parser: load_point_pillar_params
