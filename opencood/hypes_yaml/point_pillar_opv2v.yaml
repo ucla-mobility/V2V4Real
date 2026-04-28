@@ -1,6 +1,6 @@
 name: point_pillar_opv2v
-root_dir: '/data/v2vreal/train'
-validate_dir: '/data/v2vreal/validate'
+root_dir: '/data/s2/semantic-opv2v/train'
+validate_dir: '/data/s2/semantic-opv2v/validate'
 
 wild_setting:
   async: false
@@ -15,7 +15,7 @@ wild_setting:
 
 yaml_parser: "load_point_pillar_params"
 train_params:
-  batch_size: &batch_size 4
+  batch_size: &batch_size 6
   epoches: &epoches 60
   eval_freq: 1
   save_freq: 1
@@ -63,7 +63,7 @@ postprocess:
     neg_threshold: 0.45
     score_threshold: 0.20
   order: 'hwl' # hwl or lwh
-  max_num: 100 # maximum number of objects in a single frame. use this number to make sure different frames has the same dimension in the same batch
+  max_num: 400 # maximum number of objects in a single frame. use this number to make sure different frames has the same dimension in the same batch
   nms_thresh: 0.15
 
 # model related

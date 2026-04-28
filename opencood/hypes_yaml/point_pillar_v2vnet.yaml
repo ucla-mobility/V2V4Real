@@ -1,4 +1,4 @@
-name: point_pillar_v2vnet
+name: point_pillar_v2vnet_nda
 root_dir: '/data/v2vreal/train'
 validate_dir: '/data/v2vreal/validate'
 
@@ -13,6 +13,8 @@ wild_setting:
   data_size: 1.06 # Mb!!
   transmission_speed: 27 # Mbps!!
   backbone_delay: 10 # ms
+
+dataset: opv2v
 
 yaml_parser: "load_point_pillar_params"
 train_params:

@@ -1,12 +1,14 @@
-name: point_pillar_mcwin_transformer_nocompression_half_hetero_rte_split_att
-root_dir: '/data/v2vreal/train'
-validate_dir: '/data/v2vreal/validate'
+name: v2xvit_opv2v
+root_dir: '/data/s2/opv2v_data/train'
+validate_dir: '/data/s2/v2v4real_data/test'
+
+dataset: opv2v
 
 wild_setting:
-  async: false
+  async: true
   async_mode: 'sim'
   async_overhead: 100
-  seed: 20
+  seed: 25
   loc_err: false
   xyz_std: 0.2
   ryp_std: 0.2
@@ -17,26 +19,32 @@ wild_setting:
 yaml_parser: "load_point_pillar_params"
 train_params:
   batch_size: &batch_size 2
-  epoches: &epoches 60
+  epoches: 60
   eval_freq: 1
   save_freq: 1
   max_cav: &max_cav 5
 
 fusion:
   core_method: 'IntermediateFusionDataset' # LateFusionDataset, EarlyFusionDataset, IntermediateFusionDataset supported
-  args: []
+  args:
+    cur_ego_pose_flag: False
+      # when the cur_ego_pose_flag is set to True, there is no time gap
+      # between  the time when the LiDAR data is captured by connected
+      # agents and when the extracted features are received by
+      # the ego vehicle, which is equal to implement STCM. When set to False,
+      # STCM has to be used.
 
 # preprocess-related
 preprocess:
   # options: BasePreprocessor, VoxelPreprocessor, BevPreprocessor
   core_method: 'SpVoxelPreprocessor'
   args:
-    voxel_size: &voxel_size [0.4, 0.4, 8]
+    voxel_size: &voxel_size [0.4, 0.4, 4]
     max_points_per_voxel: 32
     max_voxel_train: 32000
     max_voxel_test: 70000
   # lidar range for each individual cav.
-  cav_lidar_range: &cav_lidar [-140.8, -38.4, -5, 140.8, 38.4, 3]
+  cav_lidar_range: &cav_lidar [-140.8, -38.4, -3, 140.8, 38.4, 1]
 
 data_augment:
   - NAME: random_world_flip
@@ -62,9 +70,9 @@ postprocess:
   target_args:
     pos_threshold: 0.6
     neg_threshold: 0.45
-    score_threshold: 0.20
+    score_threshold: 0.27
   order: 'hwl' # hwl or lwh
-  max_num: 100 # maximum number of objects in a single frame. use this number to make sure different frames has the same dimension in the same batch
+  max_num: 120 # maximum number of objects in a single frame. use this number to make sure different frames has the same dimension in the same batch
   nms_thresh: 0.15
 
 # model related
@@ -150,8 +158,6 @@ optimizer:
     weight_decay: 1e-4
 
 lr_scheduler:
-    core_method: cosineannealwarm #step, multistep, Exponential and cosineannealwarm support
-    epoches: *epoches
-    warmup_lr: 2e-4
-    warmup_epoches: 10
-    lr_min: 2e-5
+  core_method: multistep #step, multistep and Exponential support
+  gamma: 0.1
+  step_size: [15, 50]

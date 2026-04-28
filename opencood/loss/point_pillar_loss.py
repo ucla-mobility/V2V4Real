@@ -98,6 +98,7 @@ class PointPillarLoss(nn.Module):
         positives = box_cls_labels > 0
         negatives = box_cls_labels_neg > 0
 
+
         negative_cls_weights = negatives * 1.0
         cls_weights = (negative_cls_weights + 1.0 * positives).float()
         reg_weights = positives.float()

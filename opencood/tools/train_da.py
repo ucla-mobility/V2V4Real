@@ -91,11 +91,17 @@ def main():
         model.to(device)
         DA_module.to(device)
 
+
     # define the loss
     criterion = train_utils.create_loss(hypes)
 
     # optimizer setup
-    optimizer = train_utils.setup_optimizer(hypes, model)
+    optimizer = torch.optim.Adam(
+        list(model.parameters()) + list(DA_module.parameters()),
+        lr=hypes['optimizer']['lr'],
+        eps=1e-10,
+        weight_decay=1e-4
+    )
     # lr scheduler setup
     num_steps = len(source_train_loader)
     scheduler = train_utils.setup_lr_schedular(hypes, optimizer, num_steps)
@@ -185,6 +191,7 @@ def main():
             ####DA Loss#####
             da_loss = DA_module(ouput_dict)
             losses = sum(loss for loss in da_loss.values())
+
 
             Total_loss = losses + final_loss
 

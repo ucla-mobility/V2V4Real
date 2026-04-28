@@ -37,6 +37,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
         self.data_augmentor = DataAugmentor(params['data_augment'],
                                             train,
                                             intermediate=True)
+        self.isSim = True if params['dataset'] == 'opv2v' else False
 
     def generate_augment(self):
         flip = [None, None, None]
@@ -240,9 +241,16 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
         # remove points that hit itself
         lidar_np = mask_ego_points(lidar_np)
         # project the lidar to ego space
-        lidar_np[:, :3] = \
-            box_utils.project_points_by_matrix_torch(lidar_np[:, :3],
-                                                     transformation_matrix)
+        if self.isSim:
+            lidar_np[:, :3] = box_utils.project_points_by_matrix_torch(
+                lidar_np[:, :3],
+                x1_to_x2(selected_cav_base['params']['lidar_pose'], ego_pose)
+            )
+        else:
+            lidar_np[:, :3] = box_utils.project_points_by_matrix_torch(
+                lidar_np[:, :3],
+                transformation_matrix
+            )
         # data augmentation
         lidar_np, object_bbx_center, object_bbx_mask = \
             self.augment(lidar_np, object_bbx_center, object_bbx_mask,

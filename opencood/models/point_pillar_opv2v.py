@@ -83,6 +83,8 @@ class PointPillarOPV2V(nn.Module):
                       'voxel_coords': voxel_coords,
                       'voxel_num_points': voxel_num_points,
                       'record_len': record_len}
+        
+
         # n, 4 -> n, c
         batch_dict = self.pillar_vfe(batch_dict)
         # n, c -> N, C, H, W

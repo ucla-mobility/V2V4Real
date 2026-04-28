@@ -1,6 +1,8 @@
-name: point_pillar_fcooper
-root_dir: '/data/v2vreal/train'
-validate_dir: '/data/v2vreal/validate'
+name: point_pillar_fcooper_MC_0.7
+root_dir: '/data/s2/opv2v_data/train'
+validate_dir: '/data/s2/opv2v_data/validate'
+
+dataset: opv2v
 
 wild_setting:
   async: false
@@ -19,7 +21,7 @@ train_params:
   epoches: &epoches 60
   eval_freq: 1
   save_freq: 1
-  max_cav: &max_cav 2
+  max_cav: &max_cav 5
 
 fusion:
   core_method: 'IntermediateFusionDataset' # LateFusionDataset, EarlyFusionDataset, IntermediateFusionDataset supported
@@ -30,12 +32,12 @@ preprocess:
   # options: BasePreprocessor, VoxelPreprocessor, BevPreprocessor
   core_method: 'SpVoxelPreprocessor'
   args:
-    voxel_size: &voxel_size [0.4, 0.4, 8]
+    voxel_size: &voxel_size [0.4, 0.4, 4]
     max_points_per_voxel: 32
     max_voxel_train: 32000
     max_voxel_test: 70000
   # lidar range for each individual cav.
-  cav_lidar_range: &cav_lidar [-140.8, -38.4, -5, 140.8, 38.4, 3]
+  cav_lidar_range: &cav_lidar [-140.8, -40, -3, 140.8, 40, 1]
 
 data_augment:
   - NAME: random_world_flip
@@ -63,12 +65,12 @@ postprocess:
     neg_threshold: 0.45
     score_threshold: 0.20
   order: 'hwl' # hwl or lwh
-  max_num: 100 # maximum number of objects in a single frame. use this number to make sure different frames has the same dimension in the same batch
+  max_num: 120 # maximum number of objects in a single frame. use this number to make sure different frames has the same dimension in the same batch
   nms_thresh: 0.15
 
 # model related
 model:
-  core_method: point_pillar_fcooper
+  core_method: point_pillar_fcooper_MC
   args:
     voxel_size: *voxel_size
     lidar_range: *cav_lidar

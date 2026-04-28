@@ -1,7 +1,7 @@
 name: corpbevtlidar_da
-root_dir: '/data/opv2v/rain' # the path of the source domain
-root_dir_target: '/data/v2v4real/train' # the path of the target domain
-validate_dir: '/data/v2v4real/val'
+root_dir: '/data/s2/opv2v_data/train'
+root_dir_target: '/data/s2/v2v4real_data/train'
+validate_dir: '/data/s2/v2v4real_data/validate'
 
 wild_setting:
   async: false
@@ -64,7 +64,7 @@ postprocess:
     neg_threshold: 0.45
     score_threshold: 0.20
   order: 'hwl' # hwl or lwh
-  max_num: 100 # maximum number of objects in a single frame. use this number to make sure different frames has the same dimension in the same batch
+  max_num: 120 # maximum number of objects in a single frame. use this number to make sure different frames has the same dimension in the same batch
   nms_thresh: 0.15
 
 # model related

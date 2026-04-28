@@ -117,10 +117,17 @@ def save_prediction_gt(pred_tensor, gt_tensor, pcd, timestamp, save_path):
     """
     Save prediction and gt tensor to txt file.
     """
-    pred_np = torch_tensor_to_numpy(pred_tensor)
+
     gt_np = torch_tensor_to_numpy(gt_tensor)
     pcd_np = torch_tensor_to_numpy(pcd)
 
+    # Save GT and PCD always
     np.save(os.path.join(save_path, '%04d_pcd.npy' % timestamp), pcd_np)
-    np.save(os.path.join(save_path, '%04d_pred.npy' % timestamp), pred_np)
     np.save(os.path.join(save_path, '%04d_gt.npy' % timestamp), gt_np)
+
+    # Handle prediction safely
+    if pred_tensor is not None:
+        pred_np = torch_tensor_to_numpy(pred_tensor)
+        np.save(os.path.join(save_path, '%04d_pred.npy' % timestamp), pred_np)
+    else:
+        print(f"[Warning] No prediction at frame {timestamp}")
