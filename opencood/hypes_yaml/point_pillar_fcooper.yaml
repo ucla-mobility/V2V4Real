@@ -1,4 +1,4 @@
-name: point_pillar_fcooper_MC_0.7
+name: point_pillar_fcooper_MC_nor
 root_dir: '/data/s2/opv2v_data/train'
 validate_dir: '/data/s2/opv2v_data/validate'
 

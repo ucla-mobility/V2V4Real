@@ -269,8 +269,10 @@ class VoxelPostprocessor(BasePostprocessor):
             prob = F.sigmoid(prob.permute(0, 2, 3, 1))
             prob = prob.reshape(1, -1)
 
-            # regression map
-            reg = output_dict[cav_id]['rm']
+            if 'rmean' in output_dict[cav_id]:
+                reg = output_dict[cav_id]['rmean']
+            else:
+                reg = output_dict[cav_id]['rm']
 
             # convert regression map back to bounding box
             # (N, W*L*anchor_num, 7)
@@ -336,6 +338,149 @@ class VoxelPostprocessor(BasePostprocessor):
 
         return pred_box3d_tensor, scores
 
+    def post_process_with_variance(self, data_dict, output_dict):
+        """
+        Same as post_process, but also carries the per-anchor regression
+        variance through score-thresholding, NMS, and range filtering, so
+        every surviving predicted box has a matching variance vector.
+
+        This does not change post_process at all -- it's a parallel method
+        used only when uncertainty (rm_var / rm_logvar / rlogvar) is
+        present in the model output, e.g. for the Variance Network model.
+
+        Parameters
+        ----------
+        data_dict : dict
+            The dictionary containing the origin input data of model.
+
+        output_dict : dict
+            The dictionary containing the output of the model.
+
+        Returns
+        -------
+        pred_box3d_tensor : torch.Tensor
+            The prediction bounding box tensor after NMS, shape (N, 8, 3).
+        scores : torch.Tensor
+            Confidence score per box, shape (N,).
+        pred_var_tensor : torch.Tensor or None
+            Per-box regression variance, shape (N, 7), aligned 1:1 with
+            pred_box3d_tensor. None if no variance output was found.
+        """
+        pred_box3d_list = []
+        pred_box2d_list = []
+        pred_var_list = []
+        has_variance = False
+
+        for cav_id, cav_content in data_dict.items():
+            if cav_id not in output_dict:
+                continue
+            transformation_matrix = cav_content['transformation_matrix']
+            anchor_box = cav_content['anchor_box']
+
+            prob = output_dict[cav_id]['psm']
+            prob = F.sigmoid(prob.permute(0, 2, 3, 1))
+            prob = prob.reshape(1, -1)
+
+            if 'rmean' in output_dict[cav_id]:
+                reg = output_dict[cav_id]['rmean']
+            else:
+                reg = output_dict[cav_id]['rm']
+
+            batch_box3d = self.delta_to_boxes3d(reg, anchor_box)
+
+            # ---- locate a variance tensor, in any of the naming
+            # conventions used across the different VN experiments ----
+            var = None
+            if 'rm_var' in output_dict[cav_id]:
+                var = output_dict[cav_id]['rm_var']
+                has_variance = True
+            elif 'rm_logvar' in output_dict[cav_id]:
+                var = torch.exp(output_dict[cav_id]['rm_logvar'])
+                has_variance = True
+            elif 'rlogvar' in output_dict[cav_id]:
+                var = torch.exp(output_dict[cav_id]['rlogvar'])
+                has_variance = True
+
+            # flatten variance the same way delta_to_boxes3d flattens
+            # deltas, so anchor ordering matches batch_box3d exactly
+            var_flat = None
+            if var is not None:
+                if var.dim() == 4:
+                    # [B, 7*Anchor, H, W] -> [B, H, W, 7*Anchor]
+                    #                     -> [B, H*W*Anchor, 7]
+                    var_flat = var.permute(0, 2, 3, 1).contiguous().view(
+                        var.shape[0], -1, 7)
+                elif var.dim() == 5:
+                    # [B, Anchor, 7, H, W] -> [B, H, W, Anchor, 7]
+                    #                      -> [B, H*W*Anchor, 7]
+                    var_flat = var.permute(
+                        0, 3, 4, 1, 2).contiguous().reshape(
+                        var.shape[0], -1, 7)
+                else:
+                    raise ValueError(
+                        f"Unexpected variance tensor shape: {var.shape}")
+
+            mask = torch.gt(prob, self.params['target_args']['score_threshold'])
+            mask = mask.view(1, -1)
+            mask_reg = mask.unsqueeze(2).repeat(1, 1, 7)
+
+            assert batch_box3d.shape[0] == 1
+            boxes3d = torch.masked_select(batch_box3d[0],
+                                          mask_reg[0]).view(-1, 7)
+            scores = torch.masked_select(prob[0], mask[0])
+
+            var_kept = None
+            if var_flat is not None:
+                var_kept = torch.masked_select(
+                    var_flat[0], mask_reg[0]).view(-1, 7)
+
+            if len(boxes3d) != 0:
+                boxes3d_corner = box_utils.boxes_to_corners_3d(
+                    boxes3d, order=self.params['order'])
+                projected_boxes3d = box_utils.project_box3d(
+                    boxes3d_corner, transformation_matrix)
+                projected_boxes2d = box_utils.corner_to_standup_box_torch(
+                    projected_boxes3d)
+                boxes2d_score = torch.cat(
+                    (projected_boxes2d, scores.unsqueeze(1)), dim=1)
+
+                pred_box2d_list.append(boxes2d_score)
+                pred_box3d_list.append(projected_boxes3d)
+                if var_kept is not None:
+                    pred_var_list.append(var_kept)
+
+        if len(pred_box2d_list) == 0 or len(pred_box3d_list) == 0:
+            return None, None, None
+
+        pred_box2d_list = torch.vstack(pred_box2d_list)
+        scores = pred_box2d_list[:, -1]
+        pred_box3d_tensor = torch.vstack(pred_box3d_list)
+
+        pred_var_tensor = None
+        if has_variance and len(pred_var_list) == len(pred_box3d_list):
+            pred_var_tensor = torch.vstack(pred_var_list)
+
+        keep_index = box_utils.nms_rotated(pred_box3d_tensor, scores,
+                                           self.params['nms_thresh'])
+
+        pred_box3d_tensor = pred_box3d_tensor[keep_index]
+        scores = scores[keep_index]
+        if pred_var_tensor is not None:
+            pred_var_tensor = pred_var_tensor[keep_index]
+
+        mask = box_utils.get_mask_for_boxes_within_range_torch(
+            pred_box3d_tensor)
+        pred_box3d_tensor = pred_box3d_tensor[mask, :, :]
+        scores = scores[mask]
+        if pred_var_tensor is not None:
+            pred_var_tensor = pred_var_tensor[mask]
+
+        assert scores.shape[0] == pred_box3d_tensor.shape[0]
+        if pred_var_tensor is not None:
+            assert pred_var_tensor.shape[0] == pred_box3d_tensor.shape[0]
+
+        return pred_box3d_tensor, scores, pred_var_tensor
+
     @staticmethod
     def delta_to_boxes3d(deltas, anchors):
         """
@@ -355,7 +500,24 @@ class VoxelPostprocessor(BasePostprocessor):
         """
         # batch size
         N = deltas.shape[0]
-        deltas = deltas.permute(0, 2, 3, 1).contiguous().view(N, -1, 7)
+
+        # Old PointPillar
+        if deltas.dim() == 4:
+            deltas = deltas.permute(0, 2, 3, 1).contiguous().view(N, -1, 7)
+
+        # Variance Network
+        elif deltas.dim() == 5:
+            # [B, Anchor, 7, H, W]
+            # -> [B, H, W, Anchor, 7]
+            deltas = deltas.permute(0, 3, 4, 1, 2).contiguous()
+
+            # -> [B, H*W*Anchor, 7]
+            deltas = deltas.reshape(N, -1, 7)
+
+        else:
+            raise ValueError(
+                f"Unexpected regression tensor shape: {deltas.shape}"
+            )
         boxes3d = torch.zeros_like(deltas)
 
         if deltas.is_cuda:

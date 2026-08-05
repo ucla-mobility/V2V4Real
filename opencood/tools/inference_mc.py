@@ -6,6 +6,8 @@ import torch
 import torch.nn as nn
 import open3d as o3d
 from torch.utils.data import DataLoader
+import cv2
+import numpy as np
 
 import opencood.hypes_yaml.yaml_utils as yaml_utils
 from opencood.tools import train_utils, infrence_utils
@@ -13,6 +15,50 @@ from opencood.data_utils.datasets import build_dataset
 from opencood.visualization import vis_utils
 from opencood.utils import eval_utils
 
+def save_uncertainty_maps(var_psm, var_rm, save_dir, frame_id):
+
+    os.makedirs(save_dir, exist_ok=True)
+
+    # =========================
+    # PSM uncertainty
+    # =========================
+    psm_map = var_psm.mean(dim=1).squeeze().detach().cpu().numpy()
+
+    psm_max = psm_map.max()
+    if psm_max > 0:
+        psm_map = psm_map / psm_max
+
+    psm_map = np.uint8(psm_map * 255)
+
+    psm_color = cv2.applyColorMap(psm_map, cv2.COLORMAP_JET)
+    psm_color = cv2.resize(psm_color, (800, 400))
+
+    # =========================
+    # RM uncertainty
+    # =========================
+    rm_map = var_rm.mean(dim=1).squeeze().detach().cpu().numpy()
+
+    rm_max = rm_map.max()
+    if rm_max > 0:
+        rm_map = rm_map / rm_max
+
+    rm_map = np.uint8(rm_map * 255)
+
+    rm_color = cv2.applyColorMap(rm_map, cv2.COLORMAP_JET)
+    rm_color = cv2.resize(rm_color, (800, 400))
+
+    # =========================
+    # save
+    # =========================
+    cv2.imwrite(
+        os.path.join(save_dir, f"psm_uncertainty_{frame_id:05d}.png"),
+        psm_color
+    )
+
+    cv2.imwrite(
+        os.path.join(save_dir, f"rm_uncertainty_{frame_id:05d}.png"),
+        rm_color
+    )
 
 def enable_mc_dropout(model):
     """
@@ -20,7 +66,7 @@ def enable_mc_dropout(model):
     """
     model.eval()
     for m in model.modules():
-        if isinstance(m, nn.Dropout):
+        if isinstance(m, (nn.Dropout, nn.Dropout2d, nn.Dropout3d)):
             m.train()
 
 def test_parser():
@@ -81,7 +127,7 @@ def main():
     saved_path = opt.model_dir
     _, model = train_utils.load_saved_model(saved_path, model)
 
-    mc_passes = 10
+    mc_passes = 5
     enable_mc_dropout(model)
 
     # Create the dictionary for evaluation
@@ -111,6 +157,10 @@ def main():
         for _ in range(500):
             vis_aabbs_gt.append(o3d.geometry.TriangleMesh())
             vis_aabbs_pred.append(o3d.geometry.TriangleMesh())
+
+    total_var_psm = 0.0
+    total_var_rm = 0.0
+    count = 0
 
     for i, batch_data in enumerate(data_loader):
         print(batch_data["ego"]["object_bbx_center"].sum())
@@ -152,6 +202,9 @@ def main():
                 var_psm = torch.var(torch.stack(psm_list), dim=0)
                 var_rm = torch.var(torch.stack(rm_list), dim=0)
 
+                unc_save_dir = os.path.join(opt.model_dir, "uncertainty_maps")
+                save_uncertainty_maps(var_psm, var_rm, unc_save_dir, i)
+
                 mean_output_dict = {
                     'ego': {
                         'psm': mean_psm,
@@ -166,6 +219,11 @@ def main():
                       "Pred:", 0 if pred_box_tensor is None else len(pred_box_tensor))
                 print("MC psm variance:", var_psm.mean().item())
                 print("MC rm variance:", var_rm.mean().item())
+
+                var_value = var_psm.mean().item()
+                total_var_rm += var_rm.mean().item()
+                total_var_psm += var_value
+                count += 1
 
             else:
                 raise NotImplementedError('Only early, late and intermediate'
@@ -287,6 +345,12 @@ def main():
                 vis.poll_events()
                 vis.update_renderer()
                 time.sleep(0.001)
+
+    if count > 0:
+        avg_var_psm = total_var_psm / count
+        avg_var_rm = total_var_rm / count
+        print("Average MC uncertainty / variance psm:", avg_var_psm)
+        print("Average MC uncertainty / variance rm:", avg_var_rm)
 
     eval_utils.eval_final_results(result_stat,
                                   opt.model_dir)

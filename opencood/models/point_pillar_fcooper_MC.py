@@ -100,8 +100,8 @@ class PointPillarFCooperMC(nn.Module):
 
         fused_feature = self.fusion_net(spatial_features_2d, record_len)
 
-        cls_feature = self.mc_dropout(fused_feature)
-        psm = self.cls_head(cls_feature)
+        fused_feature = self.mc_dropout(fused_feature)
+        psm = self.cls_head(fused_feature)
         rm = self.reg_head(fused_feature)
 
         output_dict = {'psm': psm,

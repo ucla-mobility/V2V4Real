@@ -1,4 +1,4 @@
-name: point_pillar_fcooper_VN
+name: point_pillar_fcooper_VN_NLL_Exp3
 root_dir: '/data/s2/opv2v_data/train'
 validate_dir: '/data/s2/opv2v_data/validate'
 
@@ -78,6 +78,7 @@ model:
     max_cav: *max_cav
     compression: 0 # compression rate
     backbone_fix: false
+    num_bbox_samples: 10
 
     pillar_vfe:
       use_norm: true
@@ -108,17 +109,16 @@ loss:
     cls_weight: 1.0
     reg: 2.0
     bbox_cov_loss: negative_log_likelihood
-    num_samples: 50       # only used for energy_loss; try 50 first, not 1000
+    use_probabilistic_annealing: true
+    annealing_steps: 5000
     log_var_min: -7.0
     log_var_max: 7.0
+    beta_nll: 0.5
 
-    # warmup from normal SmoothL1 to probabilistic loss
-    use_probabilistic_annealing: true
-    annealing_steps: 10000
 
 optimizer:
   core_method: Adam
-  lr: 0.002
+  lr: 0.0002
   args:
     eps: 1e-10
     weight_decay: 1e-4

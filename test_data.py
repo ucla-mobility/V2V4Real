@@ -1,9 +1,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-frame = "0951"   # change frame number
+frame = "1067"   # change frame number
 
-base = "opencood/logs/point_pillar_fcooper_2026_04_14_21_23_41/npy"
+base = "opencood/logs/point_pillar_fcooper_VN_2026_06_23_20_29_11/npy"
 gt = np.load(f"{base}/{frame}_gt.npy")
 pred = np.load(f"{base}/{frame}_pred.npy")
 pcd = np.load(f"{base}/{frame}_pcd.npy")
@@ -25,4 +25,4 @@ for box in pred:
 plt.title("Green = GT | Red = Prediction")
 plt.axis("equal")
 
-plt.savefig("fcooper", dpi=300)
+plt.savefig("fcooper_VN_NLL_1067", dpi=300)

@@ -453,6 +453,28 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
 
         return pred_box_tensor, pred_score, gt_box_tensor
 
+    def post_process_with_variance(self, data_dict, output_dict):
+        """
+        Same as post_process, but also returns the per-box regression
+        variance aligned with pred_box_tensor. Only meaningful for the
+        Variance Network model -- pred_var_tensor will be None if the
+        model output doesn't contain uncertainty.
+
+        Returns
+        -------
+        pred_box_tensor : torch.Tensor
+        pred_score : torch.Tensor
+        pred_var_tensor : torch.Tensor or None
+            Shape (N, 7), one variance vector per surviving predicted box.
+        gt_box_tensor : torch.Tensor
+        """
+        pred_box_tensor, pred_score, pred_var_tensor = \
+            self.post_processor.post_process_with_variance(data_dict,
+                                                            output_dict)
+        gt_box_tensor = self.post_processor.generate_gt_bbx(data_dict)
+
+        return pred_box_tensor, pred_score, pred_var_tensor, gt_box_tensor
+
     def get_pairwise_transformation(self, base_data_dict, max_cav):
         """
         Get pair-wise transformation matrix accross different agents.

@@ -113,6 +113,41 @@ def inference_intermediate_fusion(batch_data, model, dataset):
     return inference_early_fusion(batch_data, model, dataset)
 
 
+def inference_intermediate_fusion_with_variance(batch_data, model, dataset):
+    """
+    Same as inference_intermediate_fusion, but also returns the per-box
+    regression variance aligned with pred_box_tensor. Requires the
+    dataset's post_process_with_variance method (see
+    IntermediateFusionDataset).
+
+    Parameters
+    ----------
+    batch_data : dict
+    model : opencood.object
+    dataset : opencood.IntermediateFusionDataset
+
+    Returns
+    -------
+    pred_box_tensor : torch.Tensor
+        The tensor of prediction bounding box after NMS.
+    pred_score : torch.Tensor
+    pred_var_tensor : torch.Tensor or None
+        Shape (N, 7), one variance vector per surviving predicted box.
+        None if the model has no uncertainty output (e.g. baseline model).
+    gt_box_tensor : torch.Tensor
+        The tensor of gt bounding box.
+    """
+    output_dict = OrderedDict()
+    cav_content = batch_data['ego']
+
+    output_dict['ego'] = model(cav_content)
+
+    pred_box_tensor, pred_score, pred_var_tensor, gt_box_tensor = \
+        dataset.post_process_with_variance(batch_data, output_dict)
+
+    return pred_box_tensor, pred_score, pred_var_tensor, gt_box_tensor
+
+
 def save_prediction_gt(pred_tensor, gt_tensor, pcd, timestamp, save_path):
     """
     Save prediction and gt tensor to txt file.

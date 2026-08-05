@@ -1,6 +1,6 @@
 name: v2xvit_opv2v
 root_dir: '/data/s2/opv2v_data/train'
-validate_dir: '/data/s2/v2v4real_data/test'
+validate_dir: '/data/s2/opv2v_data/validate'
 
 dataset: opv2v
 
@@ -77,7 +77,7 @@ postprocess:
 
 # model related
 model:
-  core_method: point_pillar_transformer
+  core_method: point_pillar_transformer_MC
   args:
     voxel_size: *voxel_size
     lidar_range: *cav_lidar
