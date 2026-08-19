@@ -1,6 +1,6 @@
 name: point_pillar_fcooper_VN_NLL_Exp3
-root_dir: '/data/s2/opv2v_data/train'
-validate_dir: '/data/s2/opv2v_data/validate'
+root_dir: '/data/s3/aziya_master_workspace/opv2v_data/train'
+validate_dir: '/data/s3/aziya_master_workspace/opv2v_data/validate'
 
 dataset: opv2v
 

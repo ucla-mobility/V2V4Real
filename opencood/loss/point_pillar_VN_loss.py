@@ -145,29 +145,13 @@ class EnergyScoreLoss(nn.Module):
     def __init__(self,
                  num_samples=8,
                  logvar_min=-7.0,
-                 logvar_max=7.0,
-                 lambda_logvar=0.01):
-        """
-        lambda_logvar: weight on an explicit logvar regularizer, added on
-            top of the energy score. Without this, nothing anchors the
-            predicted variance to a realistic scale -- the repulsion term
-            in the energy score pushes back against total collapse to
-            zero, but empirically the predicted variance can still end up
-            far smaller than the true error scale (this is what we saw:
-            mean predicted std ~15-20x smaller than RMSE in every bin).
-            This term is the same idea as the lambda_logvar term already
-            used in GaussianNLLRegLoss, just ported over here. Start
-            small (0.01) since the two losses operate on different
-            scales; increase if predicted variance is still too small
-            after retraining, decrease if AP regresses.
-        """
+                 logvar_max=7.0):
 
         super().__init__()
 
         self.num_samples = num_samples
         self.logvar_min = logvar_min
         self.logvar_max = logvar_max
-        self.lambda_logvar = lambda_logvar
 
     def forward(self,
                 input,
@@ -224,16 +208,8 @@ class EnergyScoreLoss(nn.Module):
         term2 = term2.mean(dim=(0,1))
 
         ###################################################
-        # Variance-scale regularizer
-        ###################################################
-        # Without this, the energy score alone has no incentive to keep
-        # predicted variance at a realistic scale -- only the repulsion
-        # term (term2) discourages full collapse to zero, which is a much
-        # weaker constraint than an explicit penalty. This mirrors the
-        # lambda_logvar term in GaussianNLLRegLoss.
-        logvar_reg = logvar.mean(dim=-1)  # average over the 7 box dims
 
-        loss = term1 - 0.5 * term2 + self.lambda_logvar * logvar_reg
+        loss = term1 - 0.5 * term2
 
         if weights is not None:
             loss *= weights
@@ -247,12 +223,10 @@ class PointPillarVNLoss(nn.Module):
         self.reg_loss_func = WeightedSmoothL1Loss()
         logvar_min = args.get('log_var_min', -7.0)
         logvar_max = args.get('log_var_max', 7.0)
-        es_lambda_logvar = args.get('es_lambda_logvar', 0.01)
         self.energy_score_loss = EnergyScoreLoss(
             num_samples=8,
             logvar_min=logvar_min,
-            logvar_max=logvar_max,
-            lambda_logvar=es_lambda_logvar
+            logvar_max=logvar_max
         )
         self.alpha = 0.25
         self.gamma = 2.0

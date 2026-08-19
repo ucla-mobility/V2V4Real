@@ -133,9 +133,9 @@ class GaussianNLLRegLoss(nn.Module):
         return loss
 
 
-class PointPillarVNLoss(nn.Module):
+class PointPillarVNLossNLL(nn.Module):
     def __init__(self, args):
-        super(PointPillarVNLoss, self).__init__()
+        super(PointPillarVNLossNLL, self).__init__()
         self.reg_loss_func = WeightedSmoothL1Loss()
         logvar_min = args.get('log_var_min', -7.0)
         logvar_max = args.get('log_var_max', 7.0)

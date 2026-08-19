@@ -98,7 +98,6 @@ class PointPillarFCooper(nn.Module):
             spatial_features_2d = self.naive_compressor(spatial_features_2d)
 
         fused_feature = self.fusion_net(spatial_features_2d, record_len)
-        print("fused features--------", fused_feature.shape)
 
         psm = self.cls_head(fused_feature)
         rm = self.reg_head(fused_feature)

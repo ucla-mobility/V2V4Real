@@ -3,25 +3,28 @@ compute_uncertainty_metrics.py
 
 Post-processing script: computes AUSE (Area Under the Sparsification Error
 curve) and UCE (Uncertainty Calibration Error) from the
-`error_vs_variance.csv` file that inference_vn.py already saves.
+`error_vs_variance_mc.csv` / `error_vs_variance_vn.csv` file that
+inference_mc.py / inference_vn.py already saves (separate filenames per
+script so they don't overwrite each other in the same --model_dir).
 
 No model, no GPU, no re-running inference needed -- just reads the CSV.
 
 Usage
 -----
 Single model:
-    python compute_uncertainty_metrics.py --csv path/to/error_vs_variance.csv --label "NLL-VN"
+    python compute_uncertainty_metrics.py --csv path/to/error_vs_variance_vn.csv --label "NLL-VN"
 
-Compare multiple models on one plot (e.g. NLL vs Energy Score):
+Compare multiple models on one plot (e.g. MC-Dropout vs NLL-VN vs Energy Score):
     python compute_uncertainty_metrics.py \
-        --csv nll_run/error_vs_variance.csv --label "NLL-VN" \
-        --csv es_run/error_vs_variance.csv  --label "Energy Score-VN"
+        --csv mc_run/error_vs_variance_mc.csv  --label "MC-Dropout" \
+        --csv nll_run/error_vs_variance_vn.csv --label "NLL-VN" \
+        --csv es_run/error_vs_variance_vn.csv  --label "Energy Score-VN"
 
 Output
 ------
 - Prints AUSE and UCE for each CSV to the console.
 - Saves a sparsification-error plot (predicted-uncertainty curve vs. oracle
-  curve) to sparsification_plot.png in the current directory.
+  curve) to sparsification_plot_Fcooper.png in the current directory.
 """
 
 import argparse
@@ -104,10 +107,11 @@ def compute_uce(errors: np.ndarray, variances: np.ndarray, n_bins: int = 10):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--csv", action="append", required=True,
-                        help="Path to error_vs_variance.csv (repeat --csv/--label for multiple models)")
+                        help="Path to error_vs_variance_mc.csv or error_vs_variance_vn.csv "
+                             "(repeat --csv/--label for multiple models)")
     parser.add_argument("--label", action="append", required=True,
                         help="Label for each --csv, in the same order")
-    parser.add_argument("--out", type=str, default="sparsification_plot.png",
+    parser.add_argument("--out", type=str, default="sparsification_plot_Fcooper.png",
                         help="Where to save the sparsification plot")
     args = parser.parse_args()
 

@@ -1,4 +1,4 @@
-name: v2xvit_opv2v
+name: v2xvit_MC
 root_dir: '/data/s2/opv2v_data/train'
 validate_dir: '/data/s2/opv2v_data/validate'
 

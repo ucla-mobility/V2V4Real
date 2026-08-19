@@ -166,3 +166,45 @@ def save_prediction_gt(pred_tensor, gt_tensor, pcd, timestamp, save_path):
         np.save(os.path.join(save_path, '%04d_pred.npy' % timestamp), pred_np)
     else:
         print(f"[Warning] No prediction at frame {timestamp}")
+
+
+def save_prediction_gt_with_variance(pred_tensor, gt_tensor, pcd,
+                                     timestamp, save_path,
+                                     pred_var_tensor=None,
+                                     pred_score=None):
+    """
+    Same as save_prediction_gt(), plus optionally saves the per-box
+    variance and per-box confidence score, so a real frame's uncertainty
+    can be plotted later without re-running the model.
+
+    Files written (N = number of surviving predicted boxes):
+        %04d_pcd.npy    (P, 4)    lidar points, xyzi           -- unchanged
+        %04d_gt.npy     (G, 8, 3) GT box corners                -- unchanged
+        %04d_pred.npy   (N, 8, 3) predicted box corners         -- unchanged
+        %04d_var.npy    (N, 7)    predicted variance per box    -- NEW, only
+                                    if pred_var_tensor is not None
+        %04d_score.npy  (N,)      predicted confidence per box  -- NEW, only
+                                    if pred_score is not None
+    """
+    gt_np = torch_tensor_to_numpy(gt_tensor)
+    pcd_np = torch_tensor_to_numpy(pcd)
+
+    # Save GT and PCD always
+    np.save(os.path.join(save_path, '%04d_pcd.npy' % timestamp), pcd_np)
+    np.save(os.path.join(save_path, '%04d_gt.npy' % timestamp), gt_np)
+
+    # Handle prediction safely
+    if pred_tensor is not None:
+        pred_np = torch_tensor_to_numpy(pred_tensor)
+        np.save(os.path.join(save_path, '%04d_pred.npy' % timestamp), pred_np)
+    else:
+        print(f"[Warning] No prediction at frame {timestamp}")
+        return
+
+    if pred_var_tensor is not None:
+        var_np = torch_tensor_to_numpy(pred_var_tensor)
+        np.save(os.path.join(save_path, '%04d_var.npy' % timestamp), var_np)
+
+    if pred_score is not None:
+        score_np = torch_tensor_to_numpy(pred_score)
+        np.save(os.path.join(save_path, '%04d_score.npy' % timestamp), score_np)

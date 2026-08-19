@@ -34,7 +34,9 @@ class PointPillarFCooperMC(nn.Module):
             self.naive_compressor = NaiveCompressor(256, args['compression'])
 
         self.fusion_net = SpatialFusion()
-        self.mc_dropout = nn.Dropout(p=0.7)
+        self.mc_dropout = nn.Dropout(
+            p=args.get('mc_dropout_p', 0.2)
+        )
 
         self.cls_head = nn.Conv2d(128 * 2, args['anchor_number'],
                                   kernel_size=1)

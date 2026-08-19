@@ -1,7 +1,18 @@
-name: point_pillar_v2vnet_nda
-root_dir: '/data/v2vreal/train'
-validate_dir: '/data/v2vreal/validate'
+name: point_pillar_v2vnet_MC
 
+# ============================================================
+# DATASET
+# Train on OPV2V
+# ============================================================
+root_dir: '/data/s3/aziya_master_workspace/opv2v_data/train'
+validate_dir: '/data/s3/aziya_master_workspace/opv2v_data/validate'
+
+dataset: opv2v
+
+# ============================================================
+# Communication / wild settings
+# Retained from V2V4Real-style configuration
+# ============================================================
 wild_setting:
   async: false
   async_mode: 'real'
@@ -10,130 +21,269 @@ wild_setting:
   loc_err: false
   xyz_std: 0.2
   ryp_std: 0.2
-  data_size: 1.06 # Mb!!
-  transmission_speed: 27 # Mbps!!
-  backbone_delay: 10 # ms
-
-dataset: opv2v
+  data_size: 1.06
+  transmission_speed: 27
+  backbone_delay: 10
 
 yaml_parser: "load_point_pillar_params"
+
+
+# ============================================================
+# TRAINING
+# Same as successful V2VNet hybrid baseline
+# ============================================================
 train_params:
   batch_size: &batch_size 4
   epoches: &epoches 60
   eval_freq: 1
   save_freq: 1
-  max_cav: &max_cav 2
 
+  # OPV2V setting
+  max_cav: &max_cav 5
+
+
+# ============================================================
+# FUSION DATASET
+# ============================================================
 fusion:
-  core_method: 'IntermediateFusionDataset' # LateFusionDataset, EarlyFusionDataset, IntermediateFusionDataset, FeatureFusionDataset supported
+  core_method: 'IntermediateFusionDataset'
   args: []
 
-# preprocess-related
+
+# ============================================================
+# PREPROCESSING
+# OPV2V spatial/data geometry
+# ============================================================
 preprocess:
-  # options: BasePreprocessor, VoxelPreprocessor, BevPreprocessor
   core_method: 'SpVoxelPreprocessor'
+
   args:
-    voxel_size: &voxel_size [0.4, 0.4, 8]
+    voxel_size: &voxel_size [0.4, 0.4, 4]
     max_points_per_voxel: 32
     max_voxel_train: 32000
     max_voxel_test: 70000
-  # lidar range for each individual cav.
-  cav_lidar_range: &cav_lidar [-140.8, -38.4, -5, 140.8, 38.4, 3]
 
+  cav_lidar_range: &cav_lidar [-140.8, -40, -3, 140.8, 40, 1]
+
+
+# ============================================================
+# DATA AUGMENTATION
+# ============================================================
 data_augment:
+
   - NAME: random_world_flip
-    ALONG_AXIS_LIST: [ 'x' ]
+    ALONG_AXIS_LIST: ['x']
 
   - NAME: random_world_rotation
-    WORLD_ROT_ANGLE: [ -0.78539816, 0.78539816 ]
+    WORLD_ROT_ANGLE: [-0.78539816, 0.78539816]
 
   - NAME: random_world_scaling
-    WORLD_SCALE_RANGE: [ 0.95, 1.05 ]
+    WORLD_SCALE_RANGE: [0.95, 1.05]
 
-# anchor box related
+
+# ============================================================
+# POSTPROCESSING
+# Same as successful hybrid baseline
+# ============================================================
 postprocess:
-  core_method: 'VoxelPostprocessor' # VoxelPostprocessor, BevPostprocessor supported
+  core_method: 'VoxelPostprocessor'
+
   anchor_args:
     cav_lidar_range: *cav_lidar
+
     l: 3.9
     w: 1.6
     h: 1.56
+
     r: [0, 90]
+
     feature_stride: 4
+
     num: &achor_num 2
+
   target_args:
     pos_threshold: 0.6
     neg_threshold: 0.45
     score_threshold: 0.20
-  order: 'hwl' # hwl or lwh
-  max_num: 100 # maximum number of objects in a single frame. use this number to make sure different frames has the same dimension in the same batch
+
+  order: 'hwl'
+
+  max_num: 100
+
   nms_thresh: 0.15
 
-# model related
+
+# ============================================================
+# MODEL
+#
+# IMPORTANT:
+# Same V2VNet hybrid baseline architecture,
+# but use the MC model.
+# ============================================================
 model:
-  core_method: point_pillar_v2vnet
+
+  core_method: point_pillar_v2vnet_MC
+
   args:
+
+    # OPV2V geometry
     voxel_size: *voxel_size
     lidar_range: *cav_lidar
+
     anchor_number: *achor_num
+
     max_cav: *max_cav
-    compression: 32 # compression rate
+
+
+    # ========================================================
+    # MC DROPOUT
+    # ========================================================
+    mc_dropout_p: 0.2
+
+
+    # ========================================================
+    # Keep V2V4Real V2VNet compression setting
+    # ========================================================
+    compression: 32
+
     backbone_fix: false
 
+
+    # ========================================================
+    # Pillar Feature Encoder
+    # ========================================================
     pillar_vfe:
+
       use_norm: true
+
       with_distance: false
+
       use_absolute_xyz: true
+
       num_filters: [64]
+
+
+    # ========================================================
+    # PointPillar Scatter
+    # ========================================================
     point_pillar_scatter:
+
       num_features: 64
 
+
+    # ========================================================
+    # BEV BACKBONE
+    # ========================================================
     base_bev_backbone:
+
       layer_nums: [3, 5, 8]
+
       layer_strides: [2, 2, 2]
+
       num_filters: [64, 128, 256]
+
       upsample_strides: [1, 2, 4]
+
       num_upsample_filter: [128, 128, 128]
+
+
+    # ========================================================
+    # SHRINK HEADER
+    # V2V4Real-style model configuration
+    # ========================================================
     shrink_header:
+
       kernal_size: [3]
+
       stride: [2]
+
       padding: [1]
+
       dim: [256]
-      input_dim: 384 # 128 * 3
 
+      input_dim: 384
+
+
+    # ========================================================
+    # V2VNET FUSION
+    # Keep successful hybrid baseline configuration
+    # ========================================================
     v2vfusion:
+
       use_temporal_encoding: true
+
       voxel_size: *voxel_size
+
       downsample_rate: 4
+
+      # V2V4Real V2VNet setting
       num_iteration: 1
+
       in_channels: 256
+
       gru_flag: true
-      agg_operator: "avg" # max or avg
+
+      agg_operator: "avg"
+
+
+      # OPV2V geometry requires H=50
       conv_gru:
-        H: 48
+
+        H: 50
+
         W: 176
+
         num_layers: 1
-        kernel_size: [[3,3]]
+
+        kernel_size: [[3, 3]]
 
 
-      # add decoder later
-
+# ============================================================
+# LOSS
+#
+# MC Dropout does NOT require a special uncertainty loss.
+# Keep the normal baseline PointPillar loss.
+# ============================================================
 loss:
+
   core_method: point_pillar_loss
+
   args:
+
     cls_weight: 1.0
+
     reg: 2.0
 
+
+# ============================================================
+# OPTIMIZER
+# EXACT SAME as successful hybrid baseline
+# ============================================================
 optimizer:
+
   core_method: Adam
-  lr: 0.002
+
+  lr: 0.0002
+
   args:
+
     eps: 1e-10
+
     weight_decay: 1e-4
 
+
+# ============================================================
+# LR SCHEDULER
+# EXACT SAME as successful hybrid baseline
+# ============================================================
 lr_scheduler:
-    core_method: cosineannealwarm #step, multistep, Exponential and cosineannealwarm support
-    epoches: *epoches
-    warmup_lr: 2e-4
-    warmup_epoches: 10
-    lr_min: 2e-5
+
+  core_method: cosineannealwarm
+
+  epoches: *epoches
+
+  warmup_lr: 2e-4
+
+  warmup_epoches: 10
+
+  lr_min: 2e-5
