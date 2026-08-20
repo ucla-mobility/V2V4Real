@@ -2,6 +2,26 @@ import torch
 import torch.nn as nn
 
 
+from laplace import Laplace
+
+# Pre-trained model
+model = load_map_model()
+
+# User-specified LA flavor
+la = Laplace(model, "classification",
+             subset_of_weights="all",
+             hessian_structure="diag")
+la.fit(train_loader)
+la.optimize_prior_precision(
+    method="gridsearch",
+    pred_type="glm",
+    link_approx="probit",
+    val_loader=val_loader
+)
+
+# User-specified predictive approx.
+pred = la(x, pred_type="glm", link_approx="probit")
+
 class DiagonalLaplace:
     """
     Model-agnostic diagonal Laplace approximation for OpenCOOD detectors.
