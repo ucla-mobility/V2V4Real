@@ -1,739 +1,698 @@
+"""
+Bayesian inference for OpenCOOD using a diagonal Laplace approximation.
+
+Workflow
+--------
+1. Load trained MAP OpenCOOD detector.
+2. Load previously computed diagonal curvature.
+3. Construct the Laplace posterior.
+4. Draw posterior weight samples.
+5. Run the detector for each sampled parameter vector.
+6. Aggregate:
+       - classification probabilities
+       - classification epistemic uncertainty
+       - regression predictions
+       - regression uncertainty
+7. Feed posterior-mean predictions into the normal OpenCOOD
+   post-processing/evaluation pipeline.
+"""
+
 import argparse
 import os
 
 import numpy as np
 import torch
-import csv
-from scipy.stats import pearsonr, spearmanr
-
 from torch.utils.data import DataLoader
 
-import opencood.hypes_yaml.yaml_utils as yaml_utils
-
+from opencood.data_utils.datasets import build_dataset
+from opencood.hypes_yaml.yaml_utils import load_yaml
 from opencood.tools import train_utils
-
-from opencood.data_utils.datasets import (
-    build_dataset
-)
-
-from opencood.utils import eval_utils
-
-from opencood.uncertainty.diagonal_laplace import (
-    DiagonalLaplace
-)
+from opencood.uncertainty.diagonal_laplace import DiagonalLaplace
 
 
-def parser():
+def parse_args():
 
-    p = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="OpenCOOD inference with diagonal Laplace uncertainty."
+    )
 
-    p.add_argument(
+    parser.add_argument(
         "--model_dir",
         required=True,
-        type=str
+        type=str,
+        help="Directory containing the trained OpenCOOD checkpoint.",
     )
 
-    p.add_argument(
-        "--laplace_file",
-        required=True,
-        type=str
+    parser.add_argument(
+        "--laplace_path",
+        default=None,
+        type=str,
+        help=(
+            "Saved curvature file. "
+            "Default: <model_dir>/laplace_diag.pt"
+        ),
     )
 
-    p.add_argument(
-        "--fusion_method",
-        default="intermediate",
-        choices=[
-            "intermediate"
-        ]
-    )
-
-    p.add_argument(
+    parser.add_argument(
         "--param_scope",
         default="heads",
-        choices=[
-            "heads",
-            "full"
+        choices=["heads", "full"],
+        help=(
+            "'heads': Laplace approximation over cls_head/reg_head. "
+            "'full': approximation over the complete detector."
+        ),
+    )
+
+    parser.add_argument(
+        "--alpha",
+        default=0.01,
+        type=float,
+        help="Laplace posterior covariance scaling.",
+    )
+
+    parser.add_argument(
+        "--prior_precision",
+        default=1.0,
+        type=float,
+        help="Gaussian prior precision.",
+    )
+
+    parser.add_argument(
+        "--num_samples",
+        default=10,
+        type=int,
+        help="Number of posterior Monte Carlo samples.",
+    )
+
+    parser.add_argument(
+        "--device",
+        default=None,
+        type=str,
+        help="cuda, cuda:0, cpu, etc.",
+    )
+
+    parser.add_argument(
+        "--num_workers",
+        default=4,
+        type=int,
+    )
+
+    return parser.parse_args()
+
+
+def resolve_device(device_argument):
+
+    if device_argument is not None:
+        return torch.device(device_argument)
+
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+
+    return torch.device("cpu")
+
+
+def move_to_device(data, device):
+
+    if torch.is_tensor(data):
+        return data.to(
+            device,
+            non_blocking=True,
+        )
+
+    if isinstance(data, dict):
+        return {
+            key: move_to_device(value, device)
+            for key, value in data.items()
+        }
+
+    if isinstance(data, list):
+        return [
+            move_to_device(value, device)
+            for value in data
+        ]
+
+    if isinstance(data, tuple):
+        return tuple(
+            move_to_device(value, device)
+            for value in data
+        )
+
+    return data
+
+
+# ==============================================================
+# Classification uncertainty helpers
+# ==============================================================
+
+def binary_entropy(probability, eps=1e-8):
+
+    p = probability.clamp(
+        min=eps,
+        max=1.0 - eps,
+    )
+
+    return -(
+        p * torch.log(p)
+        +
+        (1.0 - p)
+        * torch.log(1.0 - p)
+    )
+
+
+def compute_classification_uncertainty(
+    probability_samples,
+):
+
+    # probability_samples:
+    #
+    # [T, B, anchors, H, W]
+    #
+    # T = posterior samples
+
+    mean_probability = probability_samples.mean(
+        dim=0
+    )
+
+    probability_variance = probability_samples.var(
+        dim=0,
+        unbiased=False,
+    )
+
+    predictive_entropy = binary_entropy(
+        mean_probability
+    )
+
+    expected_entropy = binary_entropy(
+        probability_samples
+    ).mean(
+        dim=0
+    )
+
+    # Epistemic classification uncertainty.
+    mutual_information = (
+        predictive_entropy
+        - expected_entropy
+    ).clamp_min(
+        0.0
+    )
+
+    return {
+        "mean_probability":
+            mean_probability,
+
+        "variance":
+            probability_variance,
+
+        "predictive_entropy":
+            predictive_entropy,
+
+        "expected_entropy":
+            expected_entropy,
+
+        "mutual_information":
+            mutual_information,
+    }
+
+
+# ==============================================================
+# Regression uncertainty
+# ==============================================================
+
+def compute_regression_uncertainty(
+    regression_samples,
+):
+
+    mean_regression = regression_samples.mean(
+        dim=0
+    )
+
+    regression_variance = regression_samples.var(
+        dim=0,
+        unbiased=False,
+    )
+
+    regression_std = torch.sqrt(
+        regression_variance.clamp_min(0.0)
+    )
+
+    return {
+        "mean":
+            mean_regression,
+
+        "variance":
+            regression_variance,
+
+        "std":
+            regression_std,
+    }
+
+
+# ==============================================================
+# Probability -> logit
+# ==============================================================
+
+def probability_to_logit(
+    probability,
+    eps=1e-6,
+):
+
+    p = probability.clamp(
+        min=eps,
+        max=1.0 - eps,
+    )
+
+    return torch.log(
+        p / (1.0 - p)
+    )
+
+
+# ==============================================================
+# Laplace posterior inference
+# ==============================================================
+
+@torch.no_grad()
+def laplace_forward(
+    laplace_model,
+    ego_data,
+    num_samples,
+):
+
+    if num_samples < 1:
+        raise ValueError(
+            "num_samples must be >= 1."
+        )
+
+    classification_samples = []
+    regression_samples = []
+
+    try:
+
+        for sample_idx in range(
+            num_samples
+        ):
+
+            # --------------------------------------------------
+            # Draw theta ~ q(theta | D)
+            # --------------------------------------------------
+
+            laplace_model.sample_weights()
+
+            # --------------------------------------------------
+            # Detector forward pass
+            # --------------------------------------------------
+
+            output_dict = laplace_model.model(
+                ego_data
+            )
+
+            classification_logits = (
+                output_dict["psm"]
+            )
+
+            regression_output = (
+                output_dict["rm"]
+            )
+
+            # --------------------------------------------------
+            # Convert logits to probability before averaging.
+            #
+            # IMPORTANT:
+            #
+            #     E[sigmoid(z)] != sigmoid(E[z])
+            #
+            # so Bayesian classification should average the
+            # probabilities from individual posterior samples.
+            # --------------------------------------------------
+
+            classification_probability = (
+                torch.sigmoid(
+                    classification_logits
+                )
+            )
+
+            classification_samples.append(
+                classification_probability.detach()
+            )
+
+            regression_samples.append(
+                regression_output.detach()
+            )
+
+    finally:
+
+        # Critical:
+        #
+        # Never leave a posterior sample installed in the detector.
+        laplace_model.restore_map_weights()
+
+    classification_samples = torch.stack(
+        classification_samples,
+        dim=0,
+    )
+
+    regression_samples = torch.stack(
+        regression_samples,
+        dim=0,
+    )
+
+    classification = (
+        compute_classification_uncertainty(
+            classification_samples
+        )
+    )
+
+    regression = (
+        compute_regression_uncertainty(
+            regression_samples
+        )
+    )
+
+    return {
+        "classification":
+            classification,
+
+        "regression":
+            regression,
+
+        "classification_samples":
+            classification_samples,
+
+        "regression_samples":
+            regression_samples,
+    }
+
+
+# ==============================================================
+# Build OpenCOOD-compatible posterior-mean output
+# ==============================================================
+
+def build_bayesian_output(
+    laplace_result,
+):
+
+    mean_probability = (
+        laplace_result[
+            "classification"
+        ][
+            "mean_probability"
         ]
     )
 
-    p.add_argument(
-        "--alpha",
-        type=float,
-        default=0.001
+    mean_regression = (
+        laplace_result[
+            "regression"
+        ][
+            "mean"
+        ]
     )
 
-    p.add_argument(
-        "--prior_precision",
-        type=float,
-        default=1.0
+    # OpenCOOD postprocessor expects psm to contain logits.
+    #
+    # We have the posterior predictive probability:
+    #
+    #     p_bar = E_q[sigmoid(z_theta)]
+    #
+    # Therefore construct an equivalent logit:
+    #
+    #     logit(p_bar)
+    #
+    # such that:
+    #
+    #     sigmoid(logit(p_bar)) = p_bar
+
+    bayesian_psm = probability_to_logit(
+        mean_probability
     )
 
-    p.add_argument(
-        "--T",
-        type=int,
-        default=10
-    )
+    return {
+        "psm":
+            bayesian_psm,
 
-    p.add_argument(
-        "--isSim",
-        action="store_true"
-    )
-
-    p.add_argument(
-        "--save_uncertainty",
-        action="store_true"
-    )
-
-    return p.parse_args()
+        "rm":
+            mean_regression,
+    }
 
 
-
-def compute_ece(conf, correct, n_bins=15):
-    conf=np.asarray(conf,float); correct=np.asarray(correct,float)
-    if len(conf)==0: return float("nan")
-    edges=np.linspace(0,1,n_bins+1); ece=0.0
-    for lo,hi in zip(edges[:-1],edges[1:]):
-        m=(conf>lo)&(conf<=hi)
-        if m.any(): ece += m.mean()*abs(correct[m].mean()-conf[m].mean())
-    return float(ece)
-
-def classification_nll(conf, correct, eps=1e-8):
-    p=np.clip(np.asarray(conf,float),eps,1-eps); y=np.asarray(correct,float)
-    if len(p)==0: return float("nan")
-    return float(np.mean(-(y*np.log(p)+(1-y)*np.log(1-p))))
-
-def nearest_gt_error(pred, gt):
-    if pred is None or gt is None or len(pred)==0 or len(gt)==0: return None
-    pc=pred.mean(dim=1)[:,:3]; gc=gt.mean(dim=1)[:,:3]
-    return torch.cdist(pc,gc).min(dim=1).values
-
-def get_box_center_xy(box_corners):
-    pts = np.asarray(box_corners)[:, :2]
-    return pts.mean(axis=0)
-
-
-def nearest_anchor_value(box_center_xy, dense_map, cav_lidar_range):
-    """
-    dense_map: [anchor_num, H, W].
-    Look up the dense uncertainty at the BEV grid cell nearest the final
-    detected box center, then average over anchor rotations.
-
-    This is evaluation-only and does NOT change Laplace inference/AP.
-    """
-    xmin, ymin, _, xmax, ymax, _ = cav_lidar_range
-    _, H, W = dense_map.shape
-    x, y = box_center_xy
-
-    col = int((x - xmin) / (xmax - xmin) * W)
-    row = int((y - ymin) / (ymax - ymin) * H)
-
-    col = min(max(col, 0), W - 1)
-    row = min(max(row, 0), H - 1)
-
-    return dense_map[:, row, col].mean().item()
-
-
-def laplace_detection_regression_variance(result, pred_box_tensor,
-                                           cav_lidar_range):
-    """
-    Convert native dense Laplace regression variance into one uncertainty
-    scalar per final detected box.
-
-    result["var_reg_encoded"] has shape [B, 7*A, H, W].
-    We reshape it to [A, 7, H, W], average the 7 encoded regression
-    dimensions, and sample the map at each final box center.
-
-    This matches the nearest-anchor convention used by the MC-Dropout
-    evaluation, rather than the previous incorrect top-k MI proxy.
-    """
-    if pred_box_tensor is None or len(pred_box_tensor) == 0:
-        return None
-
-    var_rm = result["var_reg_encoded"].detach()
-    var_rm = var_rm.squeeze(0)  # [7*A, H, W]
-
-    channels, H, W = var_rm.shape
-    if channels % 7 != 0:
-        raise ValueError(
-            f"Laplace regression variance has {channels} channels; "
-            "expected a multiple of 7."
-        )
-
-    n_anchor = channels // 7
-    var_rm_map = var_rm.view(n_anchor, 7, H, W).mean(dim=1)
-
-    per_box_var = []
-    pred_np = pred_box_tensor.detach().cpu().numpy()
-
-    for box in pred_np:
-        center_xy = get_box_center_xy(box)
-        per_box_var.append(
-            nearest_anchor_value(center_xy, var_rm_map, cav_lidar_range)
-        )
-
-    return np.asarray(per_box_var, dtype=np.float64)
-
-def compute_uce(errors, variances, n_bins=15):
-    e=np.asarray(errors,float); v=np.maximum(np.asarray(variances,float),0)
-    if len(e)==0: return float("nan")
-    sd=np.sqrt(v+1e-12)
-    edges=np.linspace(sd.min(),sd.max()+1e-12,n_bins+1); ans=0.
-    for j,(lo,hi) in enumerate(zip(edges[:-1],edges[1:])):
-        m=(sd>=lo)&((sd<=hi) if j==n_bins-1 else (sd<hi))
-        if m.any(): ans += m.mean()*abs(np.sqrt(np.mean(e[m]**2))-sd[m].mean())
-    return float(ans)
-
-def compute_ause(errors, variances):
-    e=np.asarray(errors,float); u=np.asarray(variances,float); n=len(e)
-    if n<2: return float("nan")
-    xs=np.linspace(0,.95,20); po=np.argsort(-u); oo=np.argsort(-e)
-    pc=[]; oc=[]
-    for x in xs:
-        k=min(int(round(x*n)),n-1)
-        pc.append(e[po[k:]].mean()); oc.append(e[oo[k:]].mean())
-    return float(np.trapezoid(np.asarray(pc)-np.asarray(oc),xs))
-
-
-
-def extract_lidar_points_for_vis(ego_data):
-    """
-    Best-effort extraction of raw LiDAR points from common OpenCOOD batch keys.
-    Returns numpy array or None. This is visualization-only.
-    """
-    candidates = [
-        "origin_lidar",
-        "lidar_np",
-        "projected_lidar",
-    ]
-    for key in candidates:
-        if key in ego_data:
-            x = ego_data[key]
-            if isinstance(x, torch.Tensor):
-                x = x.detach().cpu().numpy()
-            elif isinstance(x, (list, tuple)) and len(x) > 0:
-                x = x[0]
-                if isinstance(x, torch.Tensor):
-                    x = x.detach().cpu().numpy()
-                else:
-                    x = np.asarray(x)
-            else:
-                x = np.asarray(x)
-            if x.ndim >= 2:
-                return x
-    return None
+# ==============================================================
+# Main
+# ==============================================================
 
 def main():
 
-    opt = parser()
+    args = parse_args()
 
-    device = torch.device(
-        "cuda"
-        if torch.cuda.is_available()
-        else "cpu"
+    device = resolve_device(
+        args.device
     )
 
-    # ------------------------------------------------
-    # Load config
-    # ------------------------------------------------
+    print(
+        f"\n[Laplace] Device: {device}"
+    )
 
-    hypes = yaml_utils.load_yaml(
+    # ----------------------------------------------------------
+    # Configuration
+    # ----------------------------------------------------------
+
+    hypes = load_yaml(
         None,
-        opt
+        args
     )
 
-    # Needed only to map final box centers back to the dense uncertainty grid.
-    cav_lidar_range = hypes["postprocess"]["anchor_args"]["cav_lidar_range"]
+    # ----------------------------------------------------------
+    # Test dataset
+    # ----------------------------------------------------------
 
-    # ------------------------------------------------
-    # Dataset
-    # ------------------------------------------------
+    print(
+        "\n[Laplace] Building evaluation dataset..."
+    )
 
-    print("Building validation/test dataset...")
-
-    dataset = build_dataset(
+    test_dataset = build_dataset(
         hypes,
-        visualize=True,
+        visualize=False,
         train=False,
-        isSim=opt.isSim
     )
 
-    loader = DataLoader(
-        dataset,
+    if hasattr(
+        test_dataset,
+        "collate_batch_test",
+    ):
+
+        collate_fn = (
+            test_dataset.collate_batch_test
+        )
+
+    else:
+
+        collate_fn = None
+
+    test_loader = DataLoader(
+        test_dataset,
         batch_size=1,
-        num_workers=8,
-        collate_fn=(
-            dataset.collate_batch_test
-        ),
+        num_workers=args.num_workers,
+        collate_fn=collate_fn,
         shuffle=False,
-        pin_memory=False,
-        drop_last=False
+        pin_memory=(
+            device.type == "cuda"
+        ),
+        drop_last=False,
     )
 
-    # ------------------------------------------------
-    # MAP model
-    # ------------------------------------------------
+    # ----------------------------------------------------------
+    # MAP detector
+    # ----------------------------------------------------------
+
+    print(
+        "\n[Laplace] Loading MAP detector..."
+    )
 
     model = train_utils.create_model(
         hypes
     )
 
-    model.to(device)
-
-    epoch, model = (
-        train_utils.load_saved_model(
-            opt.model_dir,
-            model
-        )
+    model = model.to(
+        device
     )
 
-    print(
-        f"Loaded MAP checkpoint epoch {epoch}"
+    _, model = train_utils.load_saved_model(
+        args.model_dir,
+        model,
+    )
+
+    model = model.to(
+        device
     )
 
     model.eval()
 
-    # ------------------------------------------------
-    # Laplace
-    # ------------------------------------------------
+    # ----------------------------------------------------------
+    # Parameter scope
+    # ----------------------------------------------------------
 
-    if opt.param_scope == "heads":
+    if args.param_scope == "heads":
 
         param_scope = (
             "cls_head",
-            "reg_head"
+            "reg_head",
         )
 
     else:
 
         param_scope = "full"
 
-    laplace = DiagonalLaplace(
+    # ----------------------------------------------------------
+    # Laplace object
+    # ----------------------------------------------------------
+
+    laplace_model = DiagonalLaplace(
         model=model,
         param_scope=param_scope,
-        device=device
+        device=device,
     )
 
-    laplace.load(
-        opt.laplace_file
+    # ----------------------------------------------------------
+    # Load curvature
+    # ----------------------------------------------------------
+
+    if args.laplace_path is None:
+
+        laplace_path = os.path.join(
+            args.model_dir,
+            "laplace_diag.pt",
+        )
+
+    else:
+
+        laplace_path = (
+            args.laplace_path
+        )
+
+    print(
+        "\n[Laplace] Loading curvature:"
     )
 
-    laplace.set_posterior(
-        alpha=opt.alpha,
-        prior_precision=opt.prior_precision
+    print(
+        laplace_path
     )
 
-    # ------------------------------------------------
+    laplace_model.load(
+        laplace_path
+    )
+
+    # ----------------------------------------------------------
+    # Construct posterior
+    # ----------------------------------------------------------
+
+    laplace_model.set_posterior(
+        alpha=args.alpha,
+        prior_precision=args.prior_precision,
+    )
+
+    print(
+        "\n[Laplace] Posterior ready."
+    )
+
+    print(
+        f"[Laplace] MC samples: "
+        f"{args.num_samples}"
+    )
+
+    # ----------------------------------------------------------
     # Evaluation
-    # ------------------------------------------------
+    # ----------------------------------------------------------
 
-    result_stat = {
-        0.5: {
-            "tp": [],
-            "fp": [],
-            "gt": 0
-        },
-        0.7: {
-            "tp": [],
-            "fp": [],
-            "gt": 0
-        }
-    }
+    for batch_idx, batch_data in enumerate(
+        test_loader
+    ):
 
-    result_stat_short = {
-        0.5: {"tp": [], "fp": [], "gt": 0},
-        0.7: {"tp": [], "fp": [], "gt": 0}
-    }
-
-    result_stat_middle = {
-        0.5: {"tp": [], "fp": [], "gt": 0},
-        0.7: {"tp": [], "fp": [], "gt": 0}
-    }
-
-    result_stat_long = {
-        0.5: {"tp": [], "fp": [], "gt": 0},
-        0.7: {"tp": [], "fp": [], "gt": 0}
-    }
-
-    uncertainty_dir = os.path.join(
-        opt.model_dir,
-        "laplace_uncertainty",
-        f"alpha_{opt.alpha}"
-    )
-
-    if opt.save_uncertainty:
-
-        os.makedirs(
-            uncertainty_dir,
-            exist_ok=True
-        )
-
-    result_dir = os.path.join(
-        opt.model_dir, "laplace_results",
-        f"{opt.param_scope}_alpha_{opt.alpha}_T{opt.T}"
-    )
-    os.makedirs(result_dir, exist_ok=True)
-
-    vis_dir = os.path.join(result_dir, "visualization_npz")
-    if opt.save_uncertainty:
-        os.makedirs(vis_dir, exist_ok=True)
-
-    classification_confidences = []
-    classification_correct = []
-    prediction_errors = []
-    prediction_variances = []
-
-    # ------------------------------------------------
-    # Main inference loop
-    # ------------------------------------------------
-
-    for i, batch_data in enumerate(loader):
-
-        print(
-            f"\rLaplace inference: "
-            f"{i + 1}/{len(loader)}",
-            end=""
-        )
-
-        batch_data = train_utils.to_device(
+        batch_data = move_to_device(
             batch_data,
-            device
+            device,
         )
 
-        ego_data = batch_data["ego"]
+        ego_data = batch_data[
+            "ego"
+        ]
 
-        # --------------------------------------------
-        # Bayesian MC prediction
-        # --------------------------------------------
+        # ------------------------------------------------------
+        # Bayesian forward pass
+        # ------------------------------------------------------
 
-        result = laplace.predict_raw(
+        result = laplace_forward(
+            laplace_model,
             ego_data,
-            T=opt.T
+            args.num_samples,
         )
 
-        # --------------------------------------------
-        # Convert Bayesian mean back into normal
-        # OpenCOOD output format
-        # --------------------------------------------
+        # ------------------------------------------------------
+        # Posterior predictive mean in normal OpenCOOD format
+        # ------------------------------------------------------
 
-        output_dict = (
-            laplace.make_opencood_output(
+        bayesian_output = (
+            build_bayesian_output(
                 result
             )
         )
 
-        # ------------------------------------------------
-        # IMPORTANT:
+        # ------------------------------------------------------
+        # Uncertainty tensors
+        # ------------------------------------------------------
+
+        cls_variance = result[
+            "classification"
+        ][
+            "variance"
+        ]
+
+        predictive_entropy = result[
+            "classification"
+        ][
+            "predictive_entropy"
+        ]
+
+        mutual_information = result[
+            "classification"
+        ][
+            "mutual_information"
+        ]
+
+        reg_variance = result[
+            "regression"
+        ][
+            "variance"
+        ]
+
+        # ------------------------------------------------------
+        # At this point:
         #
-        # Use the SAME dataset postprocessor as normal
-        # intermediate-fusion inference.
+        # bayesian_output["psm"]
+        # bayesian_output["rm"]
         #
-        # For intermediate fusion, model output normally
-        # corresponds to ego.
-        # ------------------------------------------------
+        # can be passed through your existing OpenCOOD
+        # postprocessor.
+        #
+        # And:
+        #
+        # cls_variance
+        # predictive_entropy
+        # mutual_information
+        # reg_variance
+        #
+        # can be fed into your existing uncertainty evaluation /
+        # visualization code.
+        # ------------------------------------------------------
 
-        output_dict_all = {
-            "ego": output_dict
-        }
+        if batch_idx % 50 == 0:
 
-        pred_box_tensor, pred_score, gt_box_tensor = (
-            dataset.post_process(
-                batch_data,
-                output_dict_all
-            )
-        )
-
-        # ------------------------------------------------
-        # Metrics only -- Laplace prediction/aggregation above is unchanged.
-        # ------------------------------------------------
-        if pred_box_tensor is not None and pred_score is not None \
-                and len(pred_box_tensor) > 0:
-
-            # Classification calibration: keep the existing definition.
-            errors = nearest_gt_error(pred_box_tensor, gt_box_tensor)
-            if errors is not None:
-                correct = (errors < 2.0).long()
-
-                classification_confidences.extend(
-                    pred_score.detach().cpu().reshape(-1).tolist()
-                )
-                classification_correct.extend(
-                    correct.detach().cpu().reshape(-1).tolist()
-                )
-
-                # Regression uncertainty:
-                # pair EACH matched final detection with the Laplace
-                # regression variance at that detection's BEV location.
-                #
-                # IMPORTANT: unlike the old code, this does NOT sort/top-k
-                # mutual information and pretend it corresponds to boxes.
-                per_box_var = laplace_detection_regression_variance(
-                    result,
-                    pred_box_tensor,
-                    cav_lidar_range
-                )
-
-                errors_np = (
-                    errors.detach().cpu().numpy().reshape(-1)
-                )
-                matched = errors_np < 2.0
-
-                if per_box_var is not None and matched.any():
-                    prediction_errors.extend(
-                        errors_np[matched].tolist()
-                    )
-                    prediction_variances.extend(
-                        per_box_var[matched].tolist()
-                    )
-
-        # ------------------------------------------------
-        # Normal AP evaluation
-        # ------------------------------------------------
-
-        eval_utils.caluclate_tp_fp(
-            pred_box_tensor,
-            pred_score,
-            gt_box_tensor,
-            result_stat,
-            0.5
-        )
-
-        eval_utils.caluclate_tp_fp(
-            pred_box_tensor,
-            pred_score,
-            gt_box_tensor,
-            result_stat,
-            0.7
-        )
-
-        # short: 0-30 m
-
-        eval_utils.caluclate_tp_fp(
-            pred_box_tensor,
-            pred_score,
-            gt_box_tensor,
-            result_stat_short,
-            0.5,
-            left_range=0,
-            right_range=30
-        )
-
-        eval_utils.caluclate_tp_fp(
-            pred_box_tensor,
-            pred_score,
-            gt_box_tensor,
-            result_stat_short,
-            0.7,
-            left_range=0,
-            right_range=30
-        )
-
-        # middle: 30-50 m
-
-        eval_utils.caluclate_tp_fp(
-            pred_box_tensor,
-            pred_score,
-            gt_box_tensor,
-            result_stat_middle,
-            0.5,
-            left_range=30,
-            right_range=50
-        )
-
-        eval_utils.caluclate_tp_fp(
-            pred_box_tensor,
-            pred_score,
-            gt_box_tensor,
-            result_stat_middle,
-            0.7,
-            left_range=30,
-            right_range=50
-        )
-
-        # long: 50-100 m
-
-        eval_utils.caluclate_tp_fp(
-            pred_box_tensor,
-            pred_score,
-            gt_box_tensor,
-            result_stat_long,
-            0.5,
-            left_range=50,
-            right_range=100
-        )
-
-        eval_utils.caluclate_tp_fp(
-            pred_box_tensor,
-            pred_score,
-            gt_box_tensor,
-            result_stat_long,
-            0.7,
-            left_range=50,
-            right_range=100
-        )
-
-        # ------------------------------------------------
-        # Save uncertainty maps
-        # ------------------------------------------------
-
-        if opt.save_uncertainty:
-
-            np.savez_compressed(
-                os.path.join(
-                    uncertainty_dir,
-                    f"{i:05d}.npz"
-                ),
-
-                mean_cls_prob=(
-                    result[
-                        "mean_cls_prob"
-                    ]
-                    .cpu()
-                    .numpy()
-                ),
-
-                cls_variance=(
-                    result[
-                        "var_cls_prob"
-                    ]
-                    .cpu()
-                    .numpy()
-                ),
-
-                predictive_entropy=(
-                    result[
-                        "predictive_entropy"
-                    ]
-                    .cpu()
-                    .numpy()
-                ),
-
-                mutual_information=(
-                    result[
-                        "mutual_information"
-                    ]
-                    .cpu()
-                    .numpy()
-                ),
-
-                reg_variance=(
-                    result[
-                        "var_reg_encoded"
-                    ]
-                    .cpu()
-                    .numpy()
-                )
+            print(
+                f"[Laplace] Processed "
+                f"{batch_idx + 1}/"
+                f"{len(test_loader)}"
             )
 
-
-            # ------------------------------------------------
-            # Visualization package.
-            # Does NOT alter Laplace inference or metrics.
-            # ------------------------------------------------
-            lidar_points = extract_lidar_points_for_vis(ego_data)
-
-            vis_payload = {
-                "pred_boxes": (
-                    pred_box_tensor.detach().cpu().numpy()
-                    if pred_box_tensor is not None
-                    else np.empty((0, 8, 3), dtype=np.float32)
-                ),
-                "pred_scores": (
-                    pred_score.detach().cpu().numpy()
-                    if pred_score is not None
-                    else np.empty((0,), dtype=np.float32)
-                ),
-                "gt_boxes": (
-                    gt_box_tensor.detach().cpu().numpy()
-                    if gt_box_tensor is not None
-                    else np.empty((0, 8, 3), dtype=np.float32)
-                ),
-                "mean_cls_prob": result["mean_cls_prob"].detach().cpu().numpy(),
-                "cls_variance": result["var_cls_prob"].detach().cpu().numpy(),
-                "predictive_entropy": result["predictive_entropy"].detach().cpu().numpy(),
-                "mutual_information": result["mutual_information"].detach().cpu().numpy(),
-                "reg_variance": result["var_reg_encoded"].detach().cpu().numpy(),
-                "alpha": np.asarray(opt.alpha, dtype=np.float32),
-                "prior_precision": np.asarray(opt.prior_precision, dtype=np.float32),
-                "T": np.asarray(opt.T, dtype=np.int32),
-            }
-
-            if lidar_points is not None:
-                vis_payload["pcd"] = lidar_points
-
-            np.savez_compressed(
-                os.path.join(vis_dir, f"{i:05d}.npz"),
-                **vis_payload
-            )
-
-    print()
-
-    # ------------------------------------------------
-    # Added metrics (evaluation only)
-    # ------------------------------------------------
-    cls_csv = os.path.join(result_dir, "classification_calibration_laplace.csv")
-    with open(cls_csv, "w", newline="") as f:
-        w=csv.writer(f); w.writerow(["confidence","correct"])
-        w.writerows(zip(classification_confidences, classification_correct))
-
-    err_csv = os.path.join(result_dir, "error_vs_variance_laplace.csv")
-    with open(err_csv, "w", newline="") as f:
-        w=csv.writer(f); w.writerow(["error_m","mean_variance"])
-        w.writerows(zip(prediction_errors, prediction_variances))
-
-    ece=compute_ece(classification_confidences, classification_correct)
-    nll=classification_nll(classification_confidences, classification_correct)
-    uce=compute_uce(prediction_errors, prediction_variances)
-    ause=compute_ause(prediction_errors, prediction_variances)
-
-    if len(prediction_errors)>10:
-        pr,pp=pearsonr(prediction_errors,prediction_variances)
-        sr,sp=spearmanr(prediction_errors,prediction_variances)
-    else:
-        pr=pp=sr=sp=float("nan")
-
-    print("\n========== Laplace metrics ==========")
-    print(f"ECE: {ece:.6f}")
-    print(f"Classification NLL: {nll:.6f}")
-    print(f"UCE: {uce:.6f}")
-    print(f"AUSE: {ause:.6f}")
-    print(f"Pearson: {pr:.6f} (p={pp:.4g})")
-    print(f"Spearman: {sr:.6f} (p={sp:.4g})")
-    print(f"Metric outputs: {result_dir}")
-    print("=====================================")
-
-    with open(os.path.join(result_dir,"laplace_metrics.txt"),"w") as f:
-        f.write(f"alpha={opt.alpha}\nprior_precision={opt.prior_precision}\nT={opt.T}\n")
-        f.write(f"ECE={ece}\nclassification_NLL={nll}\nUCE={uce}\nAUSE={ause}\n")
-        f.write(f"Pearson={pr}\nPearson_p={pp}\nSpearman={sr}\nSpearman_p={sp}\n")
-
-    # ------------------------------------------------
-    # Final AP
-    # ------------------------------------------------
-
-    eval_utils.eval_final_results(
-        result_stat,
-        result_dir
-    )
-
-    eval_utils.eval_final_results(
-        result_stat_short,
-        result_dir,
-        "short"
-    )
-
-    eval_utils.eval_final_results(
-        result_stat_middle,
-        result_dir,
-        "middle"
-    )
-
-    eval_utils.eval_final_results(
-        result_stat_long,
-        result_dir,
-        "long"
+    print(
+        "\n[Laplace] Inference complete."
     )
 
 
 if __name__ == "__main__":
-
     main()

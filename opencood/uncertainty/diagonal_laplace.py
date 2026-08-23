@@ -1,26 +1,12 @@
 import torch
 import torch.nn as nn
+from torch.nn.utils import vector_to_parameters
 
+try:
+    from laplace import Laplace as TorchLaplace
+except ImportError:  # handled with an actionable error when posterior is built
+    TorchLaplace = None
 
-from laplace import Laplace
-
-# Pre-trained model
-model = load_map_model()
-
-# User-specified LA flavor
-la = Laplace(model, "classification",
-             subset_of_weights="all",
-             hessian_structure="diag")
-la.fit(train_loader)
-la.optimize_prior_precision(
-    method="gridsearch",
-    pred_type="glm",
-    link_approx="probit",
-    val_loader=val_loader
-)
-
-# User-specified predictive approx.
-pred = la(x, pred_type="glm", link_approx="probit")
 
 class DiagonalLaplace:
     """
@@ -98,6 +84,7 @@ class DiagonalLaplace:
         self.sigma = None
         self.alpha = None
         self.prior_precision = None
+        self._torch_laplace = None
 
     # ---------------------------------------------------------
     # Fisher / curvature approximation
@@ -218,60 +205,109 @@ class DiagonalLaplace:
         alpha=0.01,
         prior_precision=1.0
     ):
+        """Construct the diagonal Gaussian posterior with ``laplace-torch``.
+
+        OpenCOOD uses a detector-specific focal + box-regression objective, which is
+        not one of laplace-torch's built-in likelihoods. Curvature is therefore
+        accumulated in :meth:`fit_empirical_diag` with the native OpenCOOD loss.
+        This method hands that diagonal curvature to laplace-torch, which owns the
+        posterior precision/covariance and parameter sampling.
+
+        To preserve the historical thesis parameterization exactly,
+
+            variance = alpha / (F + prior_precision),
+
+        we store H = F / alpha and P0 = prior_precision / alpha in laplace-torch.
         """
-        Diagonal Gaussian posterior
-
-            q(theta) = N(theta_MAP, Sigma)
-
-        with
-
-            Sigma_i = alpha / (F_i + prior_precision)
-
-        alpha:
-            posterior covariance scaling factor
-
-        prior_precision:
-            regularization / damping term
-        """
-
         if alpha < 0:
             raise ValueError("alpha must be >= 0.")
-
         if prior_precision <= 0:
-            raise ValueError(
-                "prior_precision must be > 0."
+            raise ValueError("prior_precision must be > 0.")
+        if TorchLaplace is None:
+            raise ImportError(
+                "laplace-torch is required. "
+                "Install it with `pip install laplace-torch`."
             )
 
-        self.alpha = alpha
-        self.prior_precision = prior_precision
+        self.alpha = float(alpha)
+        self.prior_precision = float(prior_precision)
 
-        self.sigma = {}
+        # alpha=0 is the deterministic MAP baseline retained for compatibility.
+        if self.alpha == 0:
+            self._torch_laplace = None
+            self.sigma = {
+                name: torch.zeros_like(v)
+                for name, v in self.theta_map.items()
+            }
+            print(
+                "\n[Laplace] alpha=0: "
+                "deterministic MAP posterior baseline."
+            )
+            return
 
-        for name, fisher in self.fisher_diag.items():
-
-            if alpha == 0:
-
-                sigma = torch.zeros_like(fisher)
-
-            else:
-
-                variance = (
-                    alpha
-                    / (
-                        fisher
-                        + prior_precision
-                        + 1e-12
-                    )
-                )
-
-                sigma = torch.sqrt(variance)
-
-            self.sigma[name] = sigma
-
-        print(
-            "\n[Laplace] Posterior constructed:"
+        # Only the selected parameters require gradients (set in __init__).
+        # DiagLaplace therefore builds its posterior over exactly this
+        # parameter set.
+        la = TorchLaplace(
+            self.model,
+            likelihood="regression",
+            subset_of_weights="all",
+            hessian_structure="diag",
+            prior_precision=self.prior_precision / self.alpha,
         )
 
+        fisher_vec = torch.cat([
+            self.fisher_diag[name].reshape(-1)
+            for name in self.param_names
+        ]).to(self.device)
+
+        theta_vec = torch.cat([
+            self.theta_map[name].reshape(-1)
+            for name in self.param_names
+        ]).to(self.device)
+
+        if fisher_vec.numel() != la.n_params:
+            raise RuntimeError(
+                f"Curvature has {fisher_vec.numel()} entries "
+                f"but laplace-torch selected "
+                f"{la.n_params} parameters."
+            )
+
+        # Inject the detector-loss curvature.
+        # Standard la.fit(loader) cannot be used here because OpenCOOD
+        # batches/targets and its joint detection loss are not a built-in
+        # laplace-torch likelihood. Posterior algebra below is laplace-torch.
+        la.H = fisher_vec / self.alpha
+        la.mean = theta_vec
+        la.n_data = 1
+        la.n_outputs = 1
+        la.loss = torch.zeros((), device=self.device)
+
+        self._torch_laplace = la
+
+        posterior_std_vec = la.posterior_scale.detach()
+
+        self.sigma = {}
+        offset = 0
+
+        for name in self.param_names:
+            ref = self.theta_map[name]
+            n = ref.numel()
+
+            self.sigma[name] = (
+                posterior_std_vec[
+                    offset:offset + n
+                ]
+                .view_as(ref)
+                .clone()
+            )
+
+            offset += n
+
+        print(
+            "\n[Laplace] Posterior constructed "
+            "with laplace-torch:"
+        )
         print(" alpha           =", alpha)
         print(" prior precision =", prior_precision)
 
@@ -281,33 +317,40 @@ class DiagonalLaplace:
 
     def print_sigma_statistics(self):
 
-        print("\n========== Posterior std statistics ==========")
+        print(
+            "\n========== Posterior std statistics =========="
+        )
 
         for name, sigma in self.sigma.items():
 
             x = sigma.detach().flatten()
-
             theta = self.theta_map[name].detach().flatten()
 
             print(f"\n{name}")
+
             print(
                 f" parameter std : "
                 f"{theta.std().item():.6e}"
             )
+
             print(
                 f" sigma median  : "
                 f"{x.median().item():.6e}"
             )
+
             print(
                 f" sigma mean    : "
                 f"{x.mean().item():.6e}"
             )
+
             print(
                 f" sigma max     : "
                 f"{x.max().item():.6e}"
             )
 
-        print("==============================================\n")
+        print(
+            "==============================================\n"
+        )
 
     # ---------------------------------------------------------
     # Weight sampling
@@ -321,19 +364,29 @@ class DiagonalLaplace:
                 "Call set_posterior() first."
             )
 
-        for name, p in self.model.named_parameters():
+        if self.alpha == 0:
+            self.restore_map_weights()
+            return
 
-            if name not in self.theta_map:
-                continue
-
-            eps = torch.randn_like(p)
-
-            sampled = (
-                self.theta_map[name]
-                + self.sigma[name] * eps
+        if self._torch_laplace is None:
+            raise RuntimeError(
+                "laplace-torch posterior is not initialized."
             )
 
-            p.copy_(sampled)
+        sample = self._torch_laplace.sample(
+            n_samples=1
+        )[0]
+
+        selected_params = [
+            p
+            for p in self.model.parameters()
+            if p.requires_grad
+        ]
+
+        vector_to_parameters(
+            sample,
+            selected_params
+        )
 
     # ---------------------------------------------------------
 
@@ -343,18 +396,25 @@ class DiagonalLaplace:
         for name, p in self.model.named_parameters():
 
             if name in self.theta_map:
-
-                p.copy_(self.theta_map[name])
+                p.copy_(
+                    self.theta_map[name]
+                )
 
     # ---------------------------------------------------------
     # MC forward
     # ---------------------------------------------------------
 
     @torch.no_grad()
-    def predict_raw(self, ego_data, T=10):
+    def predict_raw(
+        self,
+        ego_data,
+        T=10
+    ):
 
         if T < 1:
-            raise ValueError("T must be >= 1.")
+            raise ValueError(
+                "T must be >= 1."
+            )
 
         if self.sigma is None:
             raise RuntimeError(
@@ -370,7 +430,9 @@ class DiagonalLaplace:
 
                 self.sample_weights()
 
-                output = self.model(ego_data)
+                output = self.model(
+                    ego_data
+                )
 
                 psm_samples.append(
                     output["psm"].detach()
@@ -444,8 +506,11 @@ class DiagonalLaplace:
         )
 
         return {
-            "mean_cls_prob": mean_cls_prob,
-            "var_cls_prob": var_cls_prob,
+            "mean_cls_prob":
+                mean_cls_prob,
+
+            "var_cls_prob":
+                var_cls_prob,
 
             "predictive_entropy":
                 predictive_entropy,
@@ -469,7 +534,10 @@ class DiagonalLaplace:
     # ---------------------------------------------------------
 
     @staticmethod
-    def binary_entropy(prob, eps=1e-8):
+    def binary_entropy(
+        prob,
+        eps=1e-8
+    ):
 
         p = prob.clamp(
             min=eps,
@@ -509,7 +577,10 @@ class DiagonalLaplace:
 
     # ---------------------------------------------------------
 
-    def make_opencood_output(self, result):
+    def make_opencood_output(
+        self,
+        result
+    ):
         """
         Create ordinary OpenCOOD output dictionary.
 
@@ -524,15 +595,21 @@ class DiagonalLaplace:
         )
 
         return {
-            "psm": bayes_psm,
-            "rm": result["mean_reg_encoded"]
+            "psm":
+                bayes_psm,
+
+            "rm":
+                result["mean_reg_encoded"]
         }
 
     # ---------------------------------------------------------
     # Save/load
     # ---------------------------------------------------------
 
-    def save(self, path):
+    def save(
+        self,
+        path
+    ):
 
         torch.save(
             {
@@ -563,7 +640,10 @@ class DiagonalLaplace:
 
     # ---------------------------------------------------------
 
-    def load(self, path):
+    def load(
+        self,
+        path
+    ):
 
         checkpoint = torch.load(
             path,
@@ -614,6 +694,8 @@ class DiagonalLaplace:
                 k: v.to(self.device)
                 for k, v in self.sigma.items()
             }
+
+        self._torch_laplace = None
 
         self.restore_map_weights()
 
