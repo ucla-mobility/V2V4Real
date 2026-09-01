@@ -72,13 +72,13 @@ def main():
 
     # Create the dictionary for evaluation
     result_stat = {0.5: {'tp': [], 'fp': [], 'gt': 0},
-                   0.7: {'tp': [], 'fp': [], 'gt': 0}}
+                   0.3: {'tp': [], 'fp': [], 'gt': 0}}
     result_stat_short = {0.5: {'tp': [], 'fp': [], 'gt': 0},
-                         0.7: {'tp': [], 'fp': [], 'gt': 0}}
+                         0.3: {'tp': [], 'fp': [], 'gt': 0}}
     result_stat_middle = {0.5: {'tp': [], 'fp': [], 'gt': 0},
-                          0.7: {'tp': [], 'fp': [], 'gt': 0}}
+                          0.3: {'tp': [], 'fp': [], 'gt': 0}}
     result_stat_long = {0.5: {'tp': [], 'fp': [], 'gt': 0},
-                        0.7: {'tp': [], 'fp': [], 'gt': 0}}
+                        0.3: {'tp': [], 'fp': [], 'gt': 0}}
 
     if opt.show_sequence:
         vis = o3d.visualization.Visualizer()
@@ -136,7 +136,7 @@ def main():
                                        pred_score,
                                        gt_box_tensor,
                                        result_stat,
-                                       0.7)
+                                       0.3)
             # short range
             eval_utils.caluclate_tp_fp(pred_box_tensor,
                                        pred_score,
@@ -149,7 +149,7 @@ def main():
                                        pred_score,
                                        gt_box_tensor,
                                        result_stat_short,
-                                       0.7,
+                                       0.3,
                                        left_range=0,
                                        right_range=30)
 
@@ -165,7 +165,7 @@ def main():
                                        pred_score,
                                        gt_box_tensor,
                                        result_stat_middle,
-                                       0.7,
+                                       0.3,
                                        left_range=30,
                                        right_range=50)
 
@@ -181,7 +181,7 @@ def main():
                                        pred_score,
                                        gt_box_tensor,
                                        result_stat_long,
-                                       0.7,
+                                       0.3,
                                        left_range=50,
                                        right_range=100)
 

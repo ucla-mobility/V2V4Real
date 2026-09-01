@@ -76,12 +76,22 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--laplace_dir",
+        default=None,
+        type=str,
+        help=(
+            "Directory for all Laplace-generated artifacts. "
+            "Default: <model_dir>_laplace"
+        ),
+    )
+
+    parser.add_argument(
         "--output",
         default=None,
         type=str,
         help=(
             "Output path for the saved Laplace curvature. "
-            "Default: <model_dir>/laplace_diag.pt"
+            "Default: <laplace_dir>/laplace_diag.pt"
         ),
     )
 
@@ -194,6 +204,17 @@ def move_to_device(data, device):
 def main():
 
     args = parse_args()
+
+    # Keep the trained MAP directory read-only. All post-hoc Laplace
+    # artifacts are written to a sibling *_laplace directory by default.
+    if args.laplace_dir is None:
+        args.laplace_dir = args.model_dir.rstrip(os.sep) + "_laplace"
+
+    args.laplace_dir = os.path.abspath(args.laplace_dir)
+    os.makedirs(args.laplace_dir, exist_ok=True)
+
+    print(f"[Laplace] Source model directory: {os.path.abspath(args.model_dir)}")
+    print(f"[Laplace] Output directory:       {args.laplace_dir}")
 
     device = resolve_device(
         args.device
@@ -424,7 +445,7 @@ def main():
     if args.output is None:
 
         output_path = os.path.join(
-            args.model_dir,
+            args.laplace_dir,
             "laplace_diag.pt",
         )
 

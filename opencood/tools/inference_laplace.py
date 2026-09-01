@@ -18,6 +18,7 @@ Workflow
 """
 
 import argparse
+import csv
 import os
 
 import numpy as np
@@ -27,8 +28,12 @@ from torch.utils.data import DataLoader
 from opencood.data_utils.datasets import build_dataset
 from opencood.hypes_yaml.yaml_utils import load_yaml
 from opencood.tools import train_utils
+from opencood.utils import eval_utils
 from opencood.uncertainty.diagonal_laplace import DiagonalLaplace
+from metrics.calibration_utils import PaperCalibrationAccumulator
 
+
+from metrics.uncertainty_matching_utils import match_error_uncertainty_pairs
 
 def parse_args():
 
@@ -44,12 +49,22 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--laplace_dir",
+        default=None,
+        type=str,
+        help=(
+            "Directory containing Laplace artifacts and receiving Laplace "
+            "inference outputs. Default: <model_dir>_laplace"
+        ),
+    )
+
+    parser.add_argument(
         "--laplace_path",
         default=None,
         type=str,
         help=(
             "Saved curvature file. "
-            "Default: <model_dir>/laplace_diag.pt"
+            "Default: <laplace_dir>/laplace_diag.pt"
         ),
     )
 
@@ -434,12 +449,67 @@ def build_bayesian_output(
 
 
 # ==============================================================
+# Evaluation helpers (kept aligned with MC/VN protocol)
+# ==============================================================
+
+
+def box_centers(box_tensor):
+    """Center of OpenCOOD corner boxes [N,8,3]."""
+    return box_tensor.mean(dim=1).detach().cpu().numpy()
+
+
+def nearest_anchor_value(box_center_xy, dense_map, cav_lidar_range):
+    """Same nearest-grid lookup convention used by MC-Dropout."""
+    xmin, ymin, _, xmax, ymax, _ = cav_lidar_range
+    _, h, w = dense_map.shape
+    x, y = box_center_xy
+    col = int((x - xmin) / (xmax - xmin) * w)
+    row = int((y - ymin) / (ymax - ymin) * h)
+    col = min(max(col, 0), w - 1)
+    row = min(max(row, 0), h - 1)
+    return dense_map[:, row, col].mean().item()
+
+
+def per_box_regression_variance(pred_box_tensor, reg_variance, cav_lidar_range):
+    """Reduce dense encoded regression variance to one scalar per final box."""
+    if pred_box_tensor is None or len(pred_box_tensor) == 0:
+        return None
+    # reg_variance: [B, 7*anchor_num, H, W]
+    b, c, h, w = reg_variance.shape
+    if b != 1 or c % 7 != 0:
+        raise ValueError(f"Unexpected regression variance shape: {tuple(reg_variance.shape)}")
+    n_anchor = c // 7
+    dense = reg_variance.squeeze(0).view(n_anchor, 7, h, w).mean(dim=1)
+    values = []
+    for box in pred_box_tensor:
+        center_xy = box.detach().cpu().numpy()[:, :2].mean(axis=0)
+        values.append(nearest_anchor_value(center_xy, dense, cav_lidar_range))
+    return torch.tensor(values, device=reg_variance.device).unsqueeze(-1)
+
+
+# ==============================================================
 # Main
 # ==============================================================
 
 def main():
 
     args = parse_args()
+
+    # The original training directory is only used to load config/MAP weights.
+    # Laplace artifacts live in a separate sibling directory.
+    if args.laplace_dir is None:
+        args.laplace_dir = args.model_dir.rstrip(os.sep) + "_laplace"
+
+    args.laplace_dir = os.path.abspath(args.laplace_dir)
+    os.makedirs(args.laplace_dir, exist_ok=True)
+
+    # Create standard locations now so later evaluation/visualization code can
+    # write there without polluting the original training directory.
+    for subdir in ("results", "uncertainty", "npy"):
+        os.makedirs(os.path.join(args.laplace_dir, subdir), exist_ok=True)
+
+    print(f"[Laplace] Source model directory: {os.path.abspath(args.model_dir)}")
+    print(f"[Laplace] Laplace directory:      {args.laplace_dir}")
 
     device = resolve_device(
         args.device
@@ -468,7 +538,7 @@ def main():
 
     test_dataset = build_dataset(
         hypes,
-        visualize=False,
+        visualize=True,
         train=False,
     )
 
@@ -556,7 +626,7 @@ def main():
     if args.laplace_path is None:
 
         laplace_path = os.path.join(
-            args.model_dir,
+            args.laplace_dir,
             "laplace_diag.pt",
         )
 
@@ -595,6 +665,27 @@ def main():
         f"[Laplace] MC samples: "
         f"{args.num_samples}"
     )
+
+    # ----------------------------------------------------------
+    # Evaluation state
+    # ----------------------------------------------------------
+
+    cav_lidar_range = hypes["postprocess"]["anchor_args"]["cav_lidar_range"]
+    result_stat = {0.5: {"tp": [], "fp": [], "gt": 0},
+                   0.3: {"tp": [], "fp": [], "gt": 0}}
+    result_stat_short = {0.5: {"tp": [], "fp": [], "gt": 0},
+                         0.3: {"tp": [], "fp": [], "gt": 0}}
+    result_stat_middle = {0.5: {"tp": [], "fp": [], "gt": 0},
+                          0.3: {"tp": [], "fp": [], "gt": 0}}
+    result_stat_long = {0.5: {"tp": [], "fp": [], "gt": 0},
+                        0.3: {"tp": [], "fp": [], "gt": 0}}
+
+    prediction_errors = []
+    prediction_variances = []
+    # Feng et al. paper-style dense classification + marginal regression ECE.
+    paper_calibration = PaperCalibrationAccumulator(n_cls_bins=10, n_reg_levels=10)
+    visualization_npz_dir = os.path.join(args.laplace_dir, "visualization_npz_laplace")
+    os.makedirs(visualization_npz_dir, exist_ok=True)
 
     # ----------------------------------------------------------
     # Evaluation
@@ -662,32 +753,114 @@ def main():
         ]
 
         # ------------------------------------------------------
-        # At this point:
-        #
-        # bayesian_output["psm"]
-        # bayesian_output["rm"]
-        #
-        # can be passed through your existing OpenCOOD
-        # postprocessor.
-        #
-        # And:
-        #
-        # cls_variance
-        # predictive_entropy
-        # mutual_information
-        # reg_variance
-        #
-        # can be fed into your existing uncertainty evaluation /
-        # visualization code.
+        # Paper-style calibration: dense classification labels and
+        # positive-anchor encoded regression targets. No 2 m matching.
         # ------------------------------------------------------
+        paper_calibration.update(
+            cls_prob=result["classification"]["mean_probability"],
+            reg_mean=result["regression"]["mean"],
+            reg_var=reg_variance,
+            batch_data=batch_data,
+        )
+
+        # ------------------------------------------------------
+        # Standard OpenCOOD post-processing of posterior mean
+        # ------------------------------------------------------
+        output_dict_mean = {"ego": bayesian_output}
+        pred_box_tensor, pred_score, gt_box_tensor = test_dataset.post_process(
+            batch_data, output_dict_mean
+        )
+
+        # ------------------------------------------------------
+        # Per-final-box regression uncertainty (same MC protocol)
+        # ------------------------------------------------------
+        pred_var_tensor = per_box_regression_variance(
+            pred_box_tensor, reg_variance, cav_lidar_range
+        )
+
+        # ------------------------------------------------------
+        # Regression uncertainty-quality pairs.
+        # Shared one-to-one AP-style BEV-IoU matching (IoU >= 0.5).
+        # ------------------------------------------------------
+        match_result = match_error_uncertainty_pairs(
+            pred_box_tensor, pred_score, pred_var_tensor, gt_box_tensor,
+            iou_threshold=0.5)
+        prediction_errors.extend(match_result["errors_m"].tolist())
+        prediction_variances.extend(match_result["uncertainties"].tolist())
+
+        # ------------------------------------------------------
+        # Standardized per-frame NPZ for plot_heatmap.py
+        # ------------------------------------------------------
+        pcd = batch_data["ego"].get("origin_lidar", [np.empty((0, 4), dtype=np.float32)])[0]
+        if torch.is_tensor(pcd):
+            pcd = pcd.detach().cpu().numpy()
+        pred_np = (pred_box_tensor.detach().cpu().numpy()
+                   if pred_box_tensor is not None else np.empty((0, 8, 3), dtype=np.float32))
+        gt_np = (gt_box_tensor.detach().cpu().numpy()
+                 if gt_box_tensor is not None else np.empty((0, 8, 3), dtype=np.float32))
+        score_np = (pred_score.detach().cpu().numpy()
+                    if pred_score is not None else np.empty((0,), dtype=np.float32))
+        np.savez_compressed(
+            os.path.join(visualization_npz_dir, f"{batch_idx:05d}.npz"),
+            method=np.asarray("Diagonal Laplace"),
+            pcd=np.asarray(pcd),
+            gt_boxes=gt_np,
+            pred_boxes=pred_np,
+            pred_scores=score_np,
+            classification_uncertainty=mutual_information.detach().cpu().numpy(),
+            mutual_information=mutual_information.detach().cpu().numpy(),
+            predictive_entropy=predictive_entropy.detach().cpu().numpy(),
+            cls_variance=cls_variance.detach().cpu().numpy(),
+            regression_uncertainty=reg_variance.detach().cpu().numpy(),
+            reg_variance=reg_variance.detach().cpu().numpy(),
+            cav_lidar_range=np.asarray(cav_lidar_range, dtype=np.float32),
+            num_samples=np.asarray(args.num_samples, dtype=np.int32),
+        )
+
+        # ------------------------------------------------------
+        # AP evaluation. Use the baseline/VN dictionary convention here:
+        # IoU 0.3 and 0.5, including the same distance ranges.
+        # ------------------------------------------------------
+        for thr in (0.5, 0.3):
+            eval_utils.caluclate_tp_fp(
+                pred_box_tensor, pred_score, gt_box_tensor, result_stat, thr
+            )
+            eval_utils.caluclate_tp_fp(
+                pred_box_tensor, pred_score, gt_box_tensor, result_stat_short, thr,
+                left_range=0, right_range=30
+            )
+            eval_utils.caluclate_tp_fp(
+                pred_box_tensor, pred_score, gt_box_tensor, result_stat_middle, thr,
+                left_range=30, right_range=50
+            )
+            eval_utils.caluclate_tp_fp(
+                pred_box_tensor, pred_score, gt_box_tensor, result_stat_long, thr,
+                left_range=50, right_range=100
+            )
 
         if batch_idx % 50 == 0:
-
             print(
-                f"[Laplace] Processed "
-                f"{batch_idx + 1}/"
-                f"{len(test_loader)}"
+                f"[Laplace] Processed {batch_idx + 1}/{len(test_loader)}"
             )
+
+    # ----------------------------------------------------------
+    # Save the same metric CSV protocol as MC/VN
+    # ----------------------------------------------------------
+    err_var_csv = os.path.join(args.laplace_dir, "error_vs_variance_laplace.csv")
+    with open(err_var_csv, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["error_m", "mean_variance"])
+        writer.writerows(zip(prediction_errors, prediction_variances))
+    print(f"[Laplace] Saved {len(prediction_errors)} matched error/variance pairs: {err_var_csv}")
+
+    # Canonical paper-style classification + regression ECE.
+    paper_calibration.save(args.laplace_dir, "diagonal_laplace")
+
+    # Standard OpenCOOD AP summaries, kept inside laplace_dir.
+    eval_utils.eval_final_results(result_stat, args.laplace_dir)
+    eval_utils.eval_final_results(result_stat_short, args.laplace_dir, "short")
+    eval_utils.eval_final_results(result_stat_middle, args.laplace_dir, "middle")
+    eval_utils.eval_final_results(result_stat_long, args.laplace_dir, "long")
 
     print(
         "\n[Laplace] Inference complete."

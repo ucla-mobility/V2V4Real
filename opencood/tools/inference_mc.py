@@ -10,15 +10,16 @@ import cv2
 import csv
 import numpy as np
 
-from scipy.stats import pearsonr, spearmanr
-from scipy.spatial.distance import cdist
 
 import opencood.hypes_yaml.yaml_utils as yaml_utils
 from opencood.tools import train_utils, infrence_utils
 from opencood.data_utils.datasets import build_dataset
 from opencood.visualization import vis_utils
 from opencood.utils import eval_utils
+from metrics.calibration_utils import PaperCalibrationAccumulator
 
+
+from metrics.uncertainty_matching_utils import match_error_uncertainty_pairs
 
 def save_uncertainty_maps(var_psm, var_rm, save_dir, frame_id):
 
@@ -122,32 +123,6 @@ def get_box_center_xy(box_corners):
     pts = np.asarray(box_corners)[:, :2]
     return pts.mean(axis=0)
 
-
-def compute_ece(confidences, corrects, n_bins=10):
-    """
-    Quick inline Expected Calibration Error, for an immediate console
-    readout. Same logic as compute_classification_calibration.py, which
-    is the script to use for the full per-bin breakdown / combined
-    reliability diagram across runs.
-    """
-    confidences = np.asarray(confidences)
-    corrects = np.asarray(corrects)
-    n = len(confidences)
-    bin_edges = np.linspace(0.0, 1.0, n_bins + 1)
-    ece = 0.0
-    for b in range(n_bins):
-        lo, hi = bin_edges[b], bin_edges[b + 1]
-        if b == n_bins - 1:
-            mask = (confidences >= lo) & (confidences <= hi)
-        else:
-            mask = (confidences >= lo) & (confidences < hi)
-        n_b = mask.sum()
-        if n_b == 0:
-            continue
-        acc_b = corrects[mask].mean()
-        conf_b = confidences[mask].mean()
-        ece += (n_b / n) * abs(acc_b - conf_b)
-    return ece
 
 
 def test_parser():
@@ -254,8 +229,8 @@ def main():
     prediction_errors = []
     prediction_variances = []
 
-    classification_confidences = []
-    classification_correct = []
+    # Feng et al. paper-style dense classification + marginal regression ECE.
+    paper_calibration = PaperCalibrationAccumulator(n_cls_bins=10, n_reg_levels=10)
 
     # Standardized per-frame files used by plot_all_uncertainty_methods.py
     visualization_npz_dir = os.path.join(opt.model_dir, 'visualization_npz_mc')
@@ -333,6 +308,15 @@ def main():
                 total_var_rm += var_rm.mean().item()
                 count += 1
 
+                # Paper-style calibration uses dense object/background labels and
+                # positive-anchor encoded regression targets. No 2 m matching.
+                paper_calibration.update(
+                    cls_prob=mean_cls_prob,
+                    reg_mean=mean_rm,
+                    reg_var=var_rm,
+                    batch_data=batch_data,
+                )
+
                 # Single NMS call on the T-pass-averaged prediction.
                 bayes_psm = probability_to_logit(mean_cls_prob)
                 output_dict_mean = {'ego': {'psm': bayes_psm, 'rm': mean_rm}}
@@ -369,52 +353,14 @@ def main():
                 pred_var_tensor = None
 
             # ==========================================================
-            # Regression: per-box (error, predicted variance) pairs for
-            # the Error-vs-Variance correlation / AUSE-UCE report below.
+            # Regression uncertainty-quality pairs.
+            # Shared one-to-one AP-style BEV-IoU matching (IoU >= 0.5).
             # ==========================================================
-            if (pred_var_tensor is not None and pred_box_tensor is not None
-                    and gt_box_tensor is not None and len(gt_box_tensor) > 0
-                    and len(pred_box_tensor) > 0):
-                pred_centers_reg = pred_box_tensor.mean(
-                    dim=1).detach().cpu().numpy()
-                gt_centers_reg = gt_box_tensor.mean(
-                    dim=1).detach().cpu().numpy()
-                dist_matrix_reg = cdist(pred_centers_reg, gt_centers_reg)
-                nearest_gt_idx_reg = dist_matrix_reg.argmin(axis=1)
-                nearest_gt_dist_reg = dist_matrix_reg.min(axis=1)
-
-                match_threshold = 2.0  # meters; same as classification match
-                var_np = pred_var_tensor.detach().cpu().numpy()  # N x 1
-
-                for box_idx in range(len(pred_box_tensor)):
-                    if nearest_gt_dist_reg[box_idx] >= match_threshold:
-                        continue
-                    prediction_errors.append(
-                        float(nearest_gt_dist_reg[box_idx]))
-                    prediction_variances.append(
-                        float(var_np[box_idx].mean()))
-
-            # ==========================================================
-            # Classification calibration (per final detected box, ECE)
-            # ==========================================================
-            if pred_box_tensor is not None and pred_score is not None:
-                scores_np = pred_score.detach().cpu().numpy()
-                if len(scores_np) > 0:
-                    if gt_box_tensor is not None and len(gt_box_tensor) > 0:
-                        pred_centers_cls = pred_box_tensor.mean(
-                            dim=1).detach().cpu().numpy()
-                        gt_centers_cls = gt_box_tensor.mean(
-                            dim=1).detach().cpu().numpy()
-                        dist_matrix_cls = cdist(pred_centers_cls, gt_centers_cls)
-                        nearest_gt_dist_cls = dist_matrix_cls.min(axis=1)
-                        match_threshold = 2.0
-                        is_correct = (nearest_gt_dist_cls < match_threshold).astype(np.float32)
-                    else:
-                        is_correct = np.zeros(len(scores_np), dtype=np.float32)
-
-                    classification_confidences.extend(scores_np.tolist())
-                    classification_correct.extend(is_correct.tolist())
-            # ==========================================================
+            match_result = match_error_uncertainty_pairs(
+                pred_box_tensor, pred_score, pred_var_tensor, gt_box_tensor,
+                iou_threshold=0.5)
+            prediction_errors.extend(match_result["errors_m"].tolist())
+            prediction_variances.extend(match_result["uncertainties"].tolist())
 
             # ==========================================================
             # Standardized uncertainty visualization package (MC Dropout)
@@ -539,46 +485,17 @@ def main():
         print("Average MC uncertainty / variance psm (raw feature map):", avg_var_psm)
         print("Average MC uncertainty / variance rm (raw feature map):", avg_var_rm)
 
-    if len(prediction_errors) > 10:
-        corr, p_value = pearsonr(prediction_errors, prediction_variances)
-        s_corr, s_p_value = spearmanr(prediction_errors, prediction_variances)
-        print("====================================")
-        print(f"Error vs Variance Pearson correlation:  {corr:.4f} "
-              f"(p={p_value:.4g})")
-        print(f"Error vs Variance Spearman correlation: {s_corr:.4f} "
-              f"(p={s_p_value:.4g})")
-        print(f"Matched boxes used: {len(prediction_errors)}")
-        print("====================================")
+    # Save matched TP error/uncertainty pairs only.
+    # Pearson, Spearman and AUSE are computed centrally in metrics/.
+    err_var_csv = os.path.join(opt.model_dir, "error_vs_variance_mc.csv")
+    with open(err_var_csv, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["error_m", "mean_variance"])
+        writer.writerows(zip(prediction_errors, prediction_variances))
+    print(f"Saved {len(prediction_errors)} matched error/variance pairs to {err_var_csv}")
 
-        err_var_csv = os.path.join(opt.model_dir, "error_vs_variance_mc.csv")
-        with open(err_var_csv, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(["error_m", "mean_variance"])
-            for e, v in zip(prediction_errors, prediction_variances):
-                writer.writerow([e, v])
-        print(f"Per-box error/variance pairs saved to {err_var_csv}")
-    else:
-        print("Not enough matched boxes to compute Error-vs-Variance "
-              "correlation (need >10 matched boxes across the test set).")
-
-    if len(classification_confidences) > 10:
-        ece = compute_ece(classification_confidences, classification_correct)
-        print("====================================")
-        print(f"Classification ECE: {ece:.5f} "
-              f"(lower is better, 0 = perfectly calibrated)")
-        print(f"Boxes used: {len(classification_confidences)}")
-        print("====================================")
-
-        cls_csv = os.path.join(opt.model_dir, "classification_calibration_mc.csv")
-        with open(cls_csv, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(["confidence", "correct"])
-            for c, k in zip(classification_confidences, classification_correct):
-                writer.writerow([c, k])
-        print(f"Per-box confidence/correctness pairs saved to {cls_csv}")
-    else:
-        print("Not enough predicted boxes to compute classification ECE "
-              "(need >10 boxes across the test set).")
+    # Canonical paper-style classification + regression ECE.
+    paper_calibration.save(opt.model_dir, "mc_dropout")
 
     eval_utils.eval_final_results(result_stat, opt.model_dir)
     eval_utils.eval_final_results(result_stat_short, opt.model_dir, "short")
