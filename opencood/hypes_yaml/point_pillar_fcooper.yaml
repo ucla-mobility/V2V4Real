@@ -1,4 +1,4 @@
-name: point_pillar_fcooper_MC
+name: point_pillar_fcooper_baseline
 root_dir: '/data/s3/aziya_master_workspace/opv2v_data/train'
 validate_dir: '/data/s3/aziya_master_workspace/opv2v_data/validate'
 
@@ -69,7 +69,7 @@ postprocess:
 
 # model related
 model:
-  core_method: point_pillar_fcooper_MC
+  core_method: point_pillar_fcooper
   args:
     voxel_size: *voxel_size
     lidar_range: *cav_lidar

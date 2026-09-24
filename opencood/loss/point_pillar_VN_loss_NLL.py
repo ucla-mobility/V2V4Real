@@ -80,7 +80,7 @@ class GaussianNLLRegLoss(nn.Module):
                  beta=1.0 / 9.0,
                  logvar_min=-7.0,
                  logvar_max=7.0,
-                 lambda_logvar=0.05):
+                 lambda_logvar=0.1):
         super().__init__()
 
         self.beta = beta
