@@ -170,9 +170,15 @@ def main():
                 if 'rm_var' in vn_output_dict:
                     var = vn_output_dict['rm_var']
                 else:
-                    var = torch.exp(rlogvar)
+                    rlogvar_clamped = torch.clamp(
+                        rlogvar,
+                        min=-7.0,
+                        max=7.0
+                    )
 
-                mean_logvar = rlogvar.mean().item()
+                    var = torch.exp(rlogvar_clamped)
+
+                mean_logvar = rlogvar_clamped.mean().item()
                 mean_var = var.mean().item()
 
                 max_var = var.max().item()

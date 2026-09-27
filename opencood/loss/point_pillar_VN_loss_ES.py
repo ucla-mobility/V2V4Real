@@ -197,17 +197,22 @@ class EnergyScoreLoss(nn.Module):
         # Second ES term
         ###################################################
 
-        diff = (
-            samples.unsqueeze(0)
-            -
-            samples.unsqueeze(1)
+        S = samples.shape[0]
+
+        diff = samples.unsqueeze(0) - samples.unsqueeze(1)
+        pair_dist = diff.norm(dim=-1)  # [S, S, B, N]
+
+        mask = ~torch.eye(
+            S,
+            dtype=torch.bool,
+            device=samples.device
         )
 
-        term2 = diff.norm(dim=-1)
-
-        term2 = term2.mean(dim=(0,1))
-
-        ###################################################
+        term2 = pair_dist[mask]
+        term2 = term2.view(
+            S * (S - 1),
+            *pair_dist.shape[2:]
+        ).mean(dim=0)
 
         loss = term1 - 0.5 * term2
 
@@ -224,7 +229,7 @@ class PointPillarVNLossES(nn.Module):
         logvar_min = args.get('log_var_min', -7.0)
         logvar_max = args.get('log_var_max', 7.0)
         self.energy_score_loss = EnergyScoreLoss(
-            num_samples=8,
+            num_samples=args.get("energy_num_samples", 8),
             logvar_min=logvar_min,
             logvar_max=logvar_max
         )

@@ -1,4 +1,4 @@
-name: point_pillar_fcooper_VN_es_Exp5
+name: point_pillar_fcooper_VN_es_Exp6
 root_dir: '/data/s3/aziya_master_workspace/opv2v_data/train'
 validate_dir: '/data/s3/aziya_master_workspace/opv2v_data/validate'
 
@@ -108,12 +108,10 @@ loss:
   args:
     cls_weight: 1.0
     reg: 2.0
-    bbox_cov_loss: negative_log_likelihood
-    use_probabilistic_annealing: true
-    annealing_steps: 5000
+    energy_num_samples: 8
     log_var_min: -7.0
     log_var_max: 7.0
-    beta_nll: 0.5
+
 
 
 optimizer:
@@ -124,13 +122,10 @@ optimizer:
     weight_decay: 1e-4
 
 lr_scheduler:
-    core_method: multistep #step, multistep, Exponential and cosineannealwarm support
+    core_method: cosineannealwarm #step, multistep, Exponential and cosineannealwarm support
     epoches: *epoches
     warmup_lr: 2e-4
     warmup_epoches: 10
     lr_min: 2e-5
-    gamma: 0.1
 
-  # 60 epoch training
-    step_size: [ 30, 50 ]
 
