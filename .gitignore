@@ -11,6 +11,7 @@ build/
 opencood/utils/box_overlaps.cpython-37m-x86_64-linux-gnu.so
 opencood/utils/box_overlaps.c
 opencood/logs/
+results
 
 # Data (VERY IMPORTANT)
 data/

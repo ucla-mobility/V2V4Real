@@ -51,6 +51,10 @@ def main():
 
     hypes = yaml_utils.load_yaml(None, opt)
     cav_lidar_range = hypes['postprocess']['anchor_args']['cav_lidar_range']
+    # clamp logvar at inference exactly as the VN losses do in training
+    loss_args = hypes.get('loss', {}).get('args', {})
+    logvar_min = loss_args.get('log_var_min', -7.0)
+    logvar_max = loss_args.get('log_var_max', 7.0)
 
     print('Dataset Building')
     opencood_dataset = build_dataset(hypes, visualize=True, train=False,
@@ -165,20 +169,16 @@ def main():
             rlogvar = None
 
             if 'rm_logvar' in vn_output_dict:
-                rlogvar = vn_output_dict['rm_logvar']
+                rlogvar = torch.clamp(vn_output_dict['rm_logvar'],
+                                      min=logvar_min,
+                                      max=logvar_max)
 
                 if 'rm_var' in vn_output_dict:
                     var = vn_output_dict['rm_var']
                 else:
-                    rlogvar_clamped = torch.clamp(
-                        rlogvar,
-                        min=-7.0,
-                        max=7.0
-                    )
+                    var = torch.exp(rlogvar)
 
-                    var = torch.exp(rlogvar_clamped)
-
-                mean_logvar = rlogvar_clamped.mean().item()
+                mean_logvar = rlogvar.mean().item()
                 mean_var = var.mean().item()
 
                 max_var = var.max().item()
@@ -271,6 +271,12 @@ def main():
 
             if opt.fusion_method != 'intermediate':
                 pred_var_tensor = None
+            elif pred_var_tensor is not None:
+                # post_process_with_variance uses exp(raw rm_logvar); clamp it
+                # like training and the calibration above (same as clamping
+                # the log-variance to [logvar_min, logvar_max]).
+                pred_var_tensor = pred_var_tensor.clamp(
+                    min=float(np.exp(logvar_min)), max=float(np.exp(logvar_max)))
 
             # ==========================================================
             # Regression uncertainty-quality pairs.
@@ -278,7 +284,8 @@ def main():
             # ==========================================================
             match_result = match_error_uncertainty_pairs(
                 pred_box_tensor, pred_score, pred_var_tensor, gt_box_tensor,
-                iou_threshold=0.5)
+                iou_threshold=0.5,
+                anchor_args=hypes['postprocess']['anchor_args'])
             prediction_errors.extend(match_result["errors_m"].tolist())
             prediction_variances.extend(match_result["uncertainties"].tolist())
 

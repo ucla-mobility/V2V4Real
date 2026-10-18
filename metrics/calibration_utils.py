@@ -160,7 +160,13 @@ class PaperCalibrationAccumulator:
         var_pos = var[pos_mask]        # [Npos, 7]
         target_pos = target[pos_mask]  # [Npos, 7]
 
-        z = (target_pos - mu_pos) / torch.sqrt(var_pos)
+        resid = target_pos - mu_pos
+        # Yaw: training regresses sin(pred - gt) (add_sin_difference), so the
+        # predicted variance describes sin(dyaw), not raw dyaw. Use the same
+        # residual here; it also ignores 180-degree heading flips, which the
+        # sin encoding treats as zero error.
+        resid[:, 6] = torch.sin(resid[:, 6])
+        z = resid / torch.sqrt(var_pos)
         pit = _normal_cdf(z).clamp(0.0, 1.0).detach().cpu().numpy()
 
         for d in range(7):

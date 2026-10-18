@@ -1,4 +1,4 @@
-name: point_pillar_attfuse_VN_NLL
+name: point_pillar_attfuse_VN_betanll_Exp1
 
 # ============================================================
 # SOURCE DOMAIN: OPV2V
@@ -118,7 +118,7 @@ postprocess:
     neg_threshold: 0.45
 
     # Keep low for cross-domain evaluation.
-    score_threshold: 0.10
+    score_threshold: 0.2
 
 
   order: 'hwl'
@@ -194,6 +194,12 @@ loss:
   args:
     cls_weight: 1.0
     reg: 2.0
+    # uncertainty loss is added on top of the baseline SmoothL1;
+    # detach_mean stops it from changing the box mean (keeps baseline AP)
+    unc_weight: 1.0
+    detach_mean: true
+    # beta-NLL (Seitzer et al. 2022): weight NLL by stop_grad(var)^beta
+    beta_nll: 0.5
     log_var_min: -7.0
     log_var_max: 7.0
 

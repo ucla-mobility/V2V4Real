@@ -69,10 +69,31 @@ def bev_iou_matrix(pred_boxes, gt_boxes):
     return out
 
 
-def reduce_per_box_variance(pred_var_tensor, n_pred):
+def centre_variance_m2(var, anchor_args, dim_axis=-1):
+    """
+    Box-centre variance in m^2 from encoded regression variance.
+
+    The encoded order is [x, y, z, h, w, l, yaw]; x/y are divided by the anchor
+    diagonal sqrt(l^2 + w^2) and z by the anchor height
+    (VoxelPostprocessor.delta_to_boxes3d). Returns
+    d^2 * (var_x + var_y) + h^2 * var_z, i.e. the expected squared 3-D centre
+    error, which matches the centre error used for the error/uncertainty pairs.
+    Works on torch tensors and numpy arrays; `dim_axis` is the 7-dim axis.
+    """
+    d2 = float(anchor_args['l']) ** 2 + float(anchor_args['w']) ** 2
+    h2 = float(anchor_args['h']) ** 2
+    if torch.is_tensor(var):
+        comp = lambda k: var.select(dim_axis, k)
+    else:
+        comp = lambda k: np.take(var, k, axis=dim_axis)
+    return d2 * (comp(0) + comp(1)) + h2 * comp(2)
+
+
+def reduce_per_box_variance(pred_var_tensor, n_pred, anchor_args=None):
     """
     Produce one scalar uncertainty per final box.
-    [N] or [N,1] stays scalar; [N,D] is averaged over regression dimensions.
+    [N] or [N,1] stays scalar (already reduced by the caller);
+    [N,7] is reduced to the box-centre variance in m^2 (needs `anchor_args`).
     """
     var = _to_numpy(pred_var_tensor)
     if var is None:
@@ -83,7 +104,14 @@ def reduce_per_box_variance(pred_var_tensor, n_pred):
             f"Variance/prediction mismatch: variance shape {var.shape}, "
             f"predictions {n_pred}."
         )
-    scalar = var if var.ndim == 1 else var.reshape(n_pred, -1).mean(axis=1)
+    if var.ndim == 1 or (var.ndim == 2 and var.shape[1] == 1):
+        scalar = var.reshape(n_pred)
+    elif var.ndim == 2 and var.shape[1] == 7:
+        if anchor_args is None:
+            raise ValueError("anchor_args is required to reduce [N,7] variance.")
+        scalar = centre_variance_m2(var, anchor_args, dim_axis=1)
+    else:
+        raise ValueError(f"Unexpected per-box variance shape {var.shape}.")
     if not np.all(np.isfinite(scalar)):
         raise ValueError("Per-box uncertainty contains NaN/Inf.")
     return scalar
@@ -95,6 +123,7 @@ def match_error_uncertainty_pairs(
     pred_var_tensor,
     gt_box_tensor,
     iou_threshold=0.5,
+    anchor_args=None,
 ):
     """Return one-to-one AP-style TP error/uncertainty pairs."""
     pred_boxes = _to_numpy(pred_box_tensor)
@@ -119,7 +148,7 @@ def match_error_uncertainty_pairs(
     if len(scores) != n_pred:
         raise ValueError(f"Got {len(scores)} scores for {n_pred} predictions.")
 
-    uncertainty = reduce_per_box_variance(pred_var_tensor, n_pred)
+    uncertainty = reduce_per_box_variance(pred_var_tensor, n_pred, anchor_args)
     ious = bev_iou_matrix(pred_boxes, gt_boxes)
     pred_centers = box_centers_3d(pred_boxes)
     gt_centers = box_centers_3d(gt_boxes)

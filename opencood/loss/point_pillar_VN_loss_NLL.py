@@ -67,40 +67,29 @@ class WeightedSmoothL1Loss(nn.Module):
 
 class GaussianNLLRegLoss(nn.Module):
     """
-    Uncertainty-weighted SmoothL1 loss.
+    Heteroscedastic Gaussian negative log-likelihood (constant dropped).
 
-    L = exp(-s) * SmoothL1(diff) + lambda_logvar * s
+    L = 0.5 * exp(-s) * diff^2 + 0.5 * s
     where s = log(sigma^2)
 
-    This preserves the original PointPillar regression objective while
-    learning heteroscedastic aleatoric uncertainty.
+    The optimum is exp(s) = diff^2, so exp(logvar) is a calibrated
+    per-dimension variance.
+
+    beta > 0 gives beta-NLL (Seitzer et al., ICLR 2022): each element is
+    weighted by stop_grad(sigma^2)^beta. This damps the exp(-s) gradient
+    blow-up from very confident predictions without moving the optimum.
+    beta = 0 is the plain NLL.
     """
 
     def __init__(self,
-                 beta=1.0 / 9.0,
                  logvar_min=-7.0,
                  logvar_max=7.0,
-                 lambda_logvar=0.1):
+                 beta=0.0):
         super().__init__()
 
-        self.beta = beta
         self.logvar_min = logvar_min
         self.logvar_max = logvar_max
-        self.lambda_logvar = lambda_logvar
-
-    @staticmethod
-    def smooth_l1_loss(diff, beta):
-
-        if beta < 1e-5:
-            return torch.abs(diff)
-
-        abs_diff = torch.abs(diff)
-
-        return torch.where(
-            abs_diff < beta,
-            0.5 * abs_diff ** 2 / beta,
-            abs_diff - 0.5 * beta
-        )
+        self.beta = beta
 
     def forward(self,
                 input,
@@ -111,8 +100,6 @@ class GaussianNLLRegLoss(nn.Module):
         target = torch.where(torch.isnan(target), input, target) #To avoid nan errors
 
         diff = input - target
-
-        smooth = self.smooth_l1_loss(diff, self.beta)
 
         # optional clamp
         logvar = torch.clamp(
@@ -125,7 +112,10 @@ class GaussianNLLRegLoss(nn.Module):
 
         precision = torch.exp(-logvar)
 
-        loss = precision * smooth + self.lambda_logvar * logvar
+        loss = 0.5 * precision * diff ** 2 + 0.5 * logvar
+
+        if self.beta > 0:
+            loss = loss * torch.exp(self.beta * logvar).detach()
 
         if weights is not None:
             loss *= weights.unsqueeze(-1)
@@ -139,8 +129,15 @@ class PointPillarVNLossNLL(nn.Module):
         self.reg_loss_func = WeightedSmoothL1Loss()
         logvar_min = args.get('log_var_min', -7.0)
         logvar_max = args.get('log_var_max', 7.0)
-        self.nll_reg_loss_func = GaussianNLLRegLoss(logvar_min=logvar_min,
-                                                    logvar_max=logvar_max)
+        self.nll_reg_loss_func = GaussianNLLRegLoss(
+            logvar_min=logvar_min,
+            logvar_max=logvar_max,
+            beta=args.get('beta_nll', 0.0))
+        # SmoothL1 keeps training the box mean exactly like the baseline;
+        # the NLL only trains the variance (on a detached mean), so
+        # uncertainty learning cannot degrade detection AP.
+        self.unc_weight = args.get('unc_weight', 1.0)
+        self.detach_mean = args.get('detach_mean', True)
         self.alpha = 0.25
         self.gamma = 2.0
 
@@ -206,22 +203,36 @@ class PointPillarVNLossNLL(nn.Module):
         box_preds_sin, reg_targets_sin = self.add_sin_difference(rm,
                                                                  targets)
 
-        # pure Gaussian NLL heteroscedastic regression loss
-        loc_loss_src = self.nll_reg_loss_func(
-            box_preds_sin,
-            reg_targets_sin,
-            rm_logvar,
-            weights=reg_weights
-        )
-
+        # box mean: same SmoothL1 regression as the baseline
+        loc_loss_src = self.reg_loss_func(box_preds_sin,
+                                          reg_targets_sin,
+                                          weights=reg_weights)
         reg_loss = loc_loss_src.sum() / rm.shape[0]
         reg_loss *= self.reg_coe
 
-        total_loss = reg_loss + conf_loss
+        # variance: Gaussian NLL around the (detached) predicted mean
+        # the sin-encoded yaw target also depends on the predicted angle,
+        # so both sides must be detached to keep this loss off the mean
+        if self.detach_mean:
+            mean_for_unc = box_preds_sin.detach()
+            target_for_unc = reg_targets_sin.detach()
+        else:
+            mean_for_unc, target_for_unc = box_preds_sin, reg_targets_sin
+        unc_loss_src = self.nll_reg_loss_func(
+            mean_for_unc,
+            target_for_unc,
+            rm_logvar,
+            weights=reg_weights
+        )
+        unc_loss = unc_loss_src.sum() / rm.shape[0]
+        unc_loss *= self.unc_weight
+
+        total_loss = reg_loss + unc_loss + conf_loss
 
         self.loss_dict.update({
             'total_loss': total_loss,
             'reg_loss': reg_loss,
+            'unc_loss': unc_loss,
             'conf_loss': conf_loss,
             'avg_rm_logvar': rm_logvar.mean().item(),
             'mean_variance': torch.exp(rm_logvar).mean().item(),
@@ -334,6 +345,10 @@ class PointPillarVNLossNLL(nn.Module):
                           epoch*batch_len + batch_id)
         if avg_rm_logvar is not None:
             writer.add_scalar('Avg_reg_logvar', avg_rm_logvar,
+                              epoch*batch_len + batch_id)
+        if 'unc_loss' in self.loss_dict:
+            writer.add_scalar('Uncertainty_loss',
+                              self.loss_dict['unc_loss'].item(),
                               epoch*batch_len + batch_id)
 
     def logging_da(self, epoch, batch_id, batch_len, writer, da_loss, pbar=None):
