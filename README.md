@@ -1,6 +1,6 @@
 # Uncertainty Estimation for Cooperative 3D Object Detection (V2V4Real)
 
-This repository is my master thesis code. It adds **uncertainty estimation** to cooperative (vehicle-to-vehicle) 3D object
+This repository adds **uncertainty estimation** to cooperative (vehicle-to-vehicle) 3D object
 detectors. The detectors are trained on the **OPV2V** simulation dataset and tested on the real-world **V2V4Real** dataset.
 
 The code is built on the official [V2V4Real](https://github.com/ucla-mobility/V2V4Real) codebase, which is built on
