@@ -249,6 +249,11 @@ class BaseDataset(Dataset):
                                                        timestamp_key,
                                                        timestamp_key_delay,
                                                        cur_ego_pose_flag)
+            # V2V4Real stores ego_speed as 0; optionally recover it (km/h,
+            # like OPV2V) from the lidar pose displacement between frames
+            if self.params.get('speed_from_pose', False):
+                data[cav_id]['params']['ego_speed'] = \
+                    self.speed_from_pose(cav_content, timestamp_index_delay)
             data[cav_id]['lidar_np'] = \
                 pcd_utils.pcd_to_np(cav_content[timestamp_key_delay]['lidar'])
             data[cav_id]['folder_name'] = \
@@ -256,6 +261,21 @@ class BaseDataset(Dataset):
             data[cav_id]['index'] = timestamp_index
             data[cav_id]['cav_id'] = int(cav_id)
         return data
+
+    def speed_from_pose(self, cav_content, timestamp_index):
+        """
+        Ego speed in km/h from the horizontal lidar pose displacement to the
+        neighbouring frame (consecutive frames are 0.1 s apart).
+        """
+        keys = [k for k in cav_content if k != 'ego']
+        if len(keys) < 2:
+            return 0.
+        i0, i1 = (timestamp_index - 1, timestamp_index) \
+            if timestamp_index > 0 else (0, 1)
+        poses = [load_yaml(cav_content[keys[i]]['yaml'])['lidar_pose']
+                 for i in (i0, i1)]
+        disp = np.linalg.norm(np.array(poses[1][:2]) - np.array(poses[0][:2]))
+        return float(disp / 0.1 * 3.6)
 
     @staticmethod
     def extract_timestamps(yaml_files):

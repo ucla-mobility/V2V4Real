@@ -1,9 +1,8 @@
-name: point_pillar_fcooper_VN_NLL_Exp3
+name: point_pillar_fcooper_baseline
 root_dir: '/data/s3/aziya_master_workspace/opv2v_data/train'
 validate_dir: '/data/s3/aziya_master_workspace/opv2v_data/validate'
 
 dataset: opv2v
-
 wild_setting:
   async: false
   async_overhead: 100
@@ -70,7 +69,7 @@ postprocess:
 
 # model related
 model:
-  core_method: point_pillar_fcooper_VN
+  core_method: point_pillar_fcooper
   args:
     voxel_size: *voxel_size
     lidar_range: *cav_lidar
@@ -78,7 +77,7 @@ model:
     max_cav: *max_cav
     compression: 0 # compression rate
     backbone_fix: false
-    num_bbox_samples: 10
+    mc_dropout_p: 0.2
 
     pillar_vfe:
       use_norm: true
@@ -104,21 +103,14 @@ model:
       # add decoder later
 
 loss:
-  core_method: point_pillar_VN_loss
+  core_method: point_pillar_loss
   args:
     cls_weight: 1.0
     reg: 2.0
-    bbox_cov_loss: negative_log_likelihood
-    use_probabilistic_annealing: true
-    annealing_steps: 5000
-    log_var_min: -7.0
-    log_var_max: 7.0
-    beta_nll: 0.5
-
 
 optimizer:
   core_method: Adam
-  lr: 0.0002
+  lr: 0.002
   args:
     eps: 1e-10
     weight_decay: 1e-4
@@ -129,4 +121,3 @@ lr_scheduler:
     warmup_lr: 2e-4
     warmup_epoches: 10
     lr_min: 2e-5
-

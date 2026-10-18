@@ -19,6 +19,13 @@ from opencood.data_utils.datasets import build_dataset
 from opencood.tools import train_utils
 
 
+class _NullWriter:
+    """Stand-in for SummaryWriter on non-master processes."""
+
+    def add_scalar(self, *args, **kwargs):
+        pass
+
+
 def train_parser():
     parser = argparse.ArgumentParser(description="synthetic data generation")
     parser.add_argument("--hypes_yaml", type=str, required=True,
@@ -38,6 +45,15 @@ def main():
     hypes = yaml_utils.load_yaml(opt.hypes_yaml, opt)
 
     multi_gpu_utils.init_distributed_mode(opt)
+    is_master = (not opt.distributed) or opt.rank == 0
+
+    # batch_size in the yaml is the total batch. Split it across GPUs so
+    # multi-GPU training keeps the same effective batch, steps per epoch
+    # and LR schedule as a single-GPU run.
+    world_size = opt.world_size if opt.distributed else 1
+    assert hypes['train_params']['batch_size'] % world_size == 0, \
+        'batch_size must be divisible by the number of GPUs'
+    per_gpu_batch_size = hypes['train_params']['batch_size'] // world_size
 
     print('-----------------Dataset Building------------------')
     opencood_train_dataset = build_dataset(hypes, visualize=False, train=True)
@@ -49,7 +65,7 @@ def main():
                                          shuffle=False)
 
         batch_sampler_train = torch.utils.data.BatchSampler(
-            sampler_train, hypes['train_params']['batch_size'], drop_last=True)
+            sampler_train, per_gpu_batch_size, drop_last=True)
 
         train_loader = DataLoader(opencood_train_dataset,
                                   batch_sampler=batch_sampler_train,
@@ -89,8 +105,12 @@ def main():
     else:
         init_epoch = 0
         # if we train the model from scratch, we need to create a folder
-        # to save the model,
-        saved_path = train_utils.setup_train(hypes)
+        # to save the model (only once, on the master process)
+        saved_path = train_utils.setup_train(hypes) if is_master else None
+        if opt.distributed:
+            path_holder = [saved_path]
+            torch.distributed.broadcast_object_list(path_holder, src=0)
+            saved_path = path_holder[0]
 
     # we assume gpu is necessary
     if torch.cuda.is_available():
@@ -98,6 +118,11 @@ def main():
     model_without_ddp = model
 
     if opt.distributed:
+        # per-GPU batch is smaller than the single-GPU batch; sync BN
+        # statistics across GPUs to match single-GPU training. This is
+        # slow when GPUs have no direct P2P link, so it can be disabled.
+        if hypes['train_params'].get('sync_bn', True):
+            model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
         model = \
             torch.nn.parallel.DistributedDataParallel(model,
                                                       device_ids=[opt.gpu],
@@ -114,7 +139,7 @@ def main():
     scheduler = train_utils.setup_lr_schedular(hypes, optimizer, num_steps)
 
     # record training
-    writer = SummaryWriter(saved_path)
+    writer = SummaryWriter(saved_path) if is_master else _NullWriter()
 
     # half precision training
     if opt.half:
@@ -135,7 +160,8 @@ def main():
         if opt.distributed:
             sampler_train.set_epoch(epoch)
 
-        pbar2 = tqdm.tqdm(total=len(train_loader), leave=True)
+        pbar2 = tqdm.tqdm(total=len(train_loader), leave=True,
+                          disable=not is_master)
 
         for i, batch_data in enumerate(train_loader):
             # the model will be evaluation mode during validation
@@ -178,7 +204,7 @@ def main():
             if hypes['lr_scheduler']['core_method'] == 'cosineannealwarm':
                 scheduler.step_update(epoch * num_steps + i)
 
-        if epoch % hypes['train_params']['save_freq'] == 0:
+        if epoch % hypes['train_params']['save_freq'] == 0 and is_master:
             torch.save(model_without_ddp.state_dict(),
                 os.path.join(saved_path, 'net_epoch%d.pth' % (epoch + 1)))
 
@@ -196,6 +222,11 @@ def main():
                                            batch_data['ego']['label_dict'])
                     valid_ave_loss.append(final_loss.item())
             valid_ave_loss = statistics.mean(valid_ave_loss)
+            if opt.distributed:
+                # average the per-GPU validation losses
+                loss_tensor = torch.tensor(valid_ave_loss, device=device)
+                torch.distributed.all_reduce(loss_tensor)
+                valid_ave_loss = loss_tensor.item() / world_size
             print('At epoch %d, the validation loss is %f' % (epoch,
                                                               valid_ave_loss))
             writer.add_scalar('Validate_Loss', valid_ave_loss, epoch)

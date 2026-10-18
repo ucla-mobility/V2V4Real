@@ -1,23 +1,26 @@
-name: point_pillar_intermediate_fusion
-root_dir: '/data/v2vreal/train'
-validate_dir: '/data/v2vreal/validate'
+name: point_pillar_fcooper_MC_Exp1
+root_dir: '/data/s3/aziya_master_workspace/opv2v_data/train'
+validate_dir: '/data/s3/aziya_master_workspace/opv2v_data/validate'
 
-
-yaml_parser: "load_point_pillar_params"
-
+dataset: opv2v
 wild_setting:
   async: false
-  async_overhead: 60
+  async_overhead: 100
   seed: 20
   loc_err: false
   xyz_std: 0.2
   ryp_std: 0.2
+  data_size: 1.06 # Mb!!
+  transmission_speed: 27 # Mbps!!
+  backbone_delay: 10 # ms
 
+yaml_parser: "load_point_pillar_params"
 train_params:
-  batch_size: &batch_size 8
-  epoches: 30
+  batch_size: &batch_size 4
+  epoches: &epoches 60
   eval_freq: 1
   save_freq: 1
+  max_cav: &max_cav 5
 
 fusion:
   core_method: 'IntermediateFusionDataset' # LateFusionDataset, EarlyFusionDataset, IntermediateFusionDataset supported
@@ -28,12 +31,12 @@ preprocess:
   # options: BasePreprocessor, VoxelPreprocessor, BevPreprocessor
   core_method: 'SpVoxelPreprocessor'
   args:
-    voxel_size: &voxel_size [0.8, 0.8, 4]
+    voxel_size: &voxel_size [0.4, 0.4, 4]
     max_points_per_voxel: 32
     max_voxel_train: 32000
     max_voxel_test: 70000
   # lidar range for each individual cav.
-  cav_lidar_range: &cav_lidar [-140.8, -38.4, -3, 140.8, 38.4, 1]
+  cav_lidar_range: &cav_lidar [-140.8, -40, -3, 140.8, 40, 1]
 
 data_augment:
   - NAME: random_world_flip
@@ -54,23 +57,27 @@ postprocess:
     w: 1.6
     h: 1.56
     r: [0, 90]
-    feature_stride: 2
+    feature_stride: 4
     num: &achor_num 2
   target_args:
     pos_threshold: 0.6
     neg_threshold: 0.45
-    score_threshold: 0.10
+    score_threshold: 0.20
   order: 'hwl' # hwl or lwh
-  max_num: 100 # maximum number of objects in a single frame. use this number to make sure different frames has the same dimension in the same batch
+  max_num: 120 # maximum number of objects in a single frame. use this number to make sure different frames has the same dimension in the same batch
   nms_thresh: 0.15
 
 # model related
 model:
-  core_method: point_pillar_intermediate
+  core_method: point_pillar_fcooper_MC
   args:
     voxel_size: *voxel_size
     lidar_range: *cav_lidar
     anchor_number: *achor_num
+    max_cav: *max_cav
+    compression: 0 # compression rate
+    backbone_fix: false
+    mc_dropout_p: 0.2
 
     pillar_vfe:
       use_norm: true
@@ -86,9 +93,14 @@ model:
       num_filters: [64, 128, 256]
       upsample_strides: [1, 2, 4]
       num_upsample_filter: [128, 128, 128]
-      compression: 0
+    shrink_header:
+      kernal_size: [3]
+      stride: [2]
+      padding: [1]
+      dim: [256]
+      input_dim: 384 # 128 * 3
 
-    anchor_num: *achor_num
+      # add decoder later
 
 loss:
   core_method: point_pillar_loss
@@ -98,13 +110,14 @@ loss:
 
 optimizer:
   core_method: Adam
-  lr: 0.001
+  lr: 0.002
   args:
     eps: 1e-10
     weight_decay: 1e-4
 
 lr_scheduler:
-  core_method: multistep #step, multistep and Exponential support
-  gamma: 0.1
-  step_size: [15, 40]
-
+    core_method: cosineannealwarm #step, multistep, Exponential and cosineannealwarm support
+    epoches: *epoches
+    warmup_lr: 2e-4
+    warmup_epoches: 10
+    lr_min: 2e-5

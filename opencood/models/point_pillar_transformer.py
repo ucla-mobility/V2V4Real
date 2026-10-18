@@ -85,11 +85,10 @@ class PointPillarTransformer(nn.Module):
                       'record_len': record_len}
         # n, 4 -> n, c
         batch_dict = self.pillar_vfe(batch_dict)
-
         # n, c -> N, C, H, W
         batch_dict = self.scatter(batch_dict)
         batch_dict = self.backbone(batch_dict)
-        print("did you go here tooooooooooo")
+
         spatial_features_2d = batch_dict['spatial_features_2d']
         # downsample feature to reduce memory
         if self.shrink_flag:

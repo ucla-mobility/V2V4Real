@@ -59,7 +59,7 @@ def caluclate_tp_fp(det_boxes, det_score, gt_boxes, result_stat, iou_thresh,
     # fp, tp and gt in the current frame
     fp = []
     tp = []
-    
+
     if det_boxes is not None:
         # convert bounding boxes to numpy array
         det_boxes = common_utils.torch_tensor_to_numpy(det_boxes)
@@ -74,16 +74,16 @@ def caluclate_tp_fp(det_boxes, det_score, gt_boxes, result_stat, iou_thresh,
         # remove the bbx out of range
         for i in range(len(det_polygon_list_origin)):
             det_polygon = det_polygon_list_origin[i]
-            distance = np.sqrt(det_polygon.centroid.x**2 +
-                               det_polygon.centroid.y**2)
+            distance = np.sqrt(det_polygon.centroid.x ** 2 +
+                               det_polygon.centroid.y ** 2)
             if left_range < distance < right_range:
                 det_polygon_list.append(det_polygon)
                 det_score_new.append(det_score[i])
 
         for i in range(len(gt_polygon_list_origin)):
             gt_polygon = gt_polygon_list_origin[i]
-            distance = np.sqrt(gt_polygon.centroid.x**2 +
-                               gt_polygon.centroid.y**2)
+            distance = np.sqrt(gt_polygon.centroid.x ** 2 +
+                               gt_polygon.centroid.y ** 2)
             if left_range < distance < right_range:
                 gt_polygon_list.append(gt_polygon)
 
@@ -157,19 +157,19 @@ def calculate_ap(result_stat, iou):
 
 def eval_final_results(result_stat, save_path, range=""):
     dump_dict = {}
-    file_name = 'eval.yaml' if range == "" else range+'_eval.yaml'
+    file_name = 'eval.yaml' if range == "" else range + '_eval.yaml'
+    ap_30, mrec_30, mpre_30 = calculate_ap(result_stat, 0.30)
     ap_50, mrec_50, mpre_50 = calculate_ap(result_stat, 0.50)
-    ap_70, mrec_70, mpre_70 = calculate_ap(result_stat, 0.70)
 
-    dump_dict.update({'ap_50': ap_50,
-                      'ap_70': ap_70,
+    dump_dict.update({'ap_30': ap_30,
+                      'ap_50': ap_50,
+                      'mpre_30': mpre_30,
+                      'mrec_30': mrec_30,
                       'mpre_50': mpre_50,
                       'mrec_50': mrec_50,
-                      'mpre_70': mpre_70,
-                      'mrec_70': mrec_70,
                       })
     yaml_utils.save_yaml(dump_dict, os.path.join(save_path, file_name))
 
     print('The range is %s, '
-          'The Average Precision at IOU 0.5 is %.3f, '
-          'The Average Precision at IOU 0.7 is %.3f' % (range,  ap_50, ap_70))
+          'The Average Precision at IOU 0.3 is %.3f, '
+          'The Average Precision at IOU 0.5 is %.3f' % (range, ap_30, ap_50))
