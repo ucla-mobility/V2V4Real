@@ -215,4 +215,3 @@ Main findings:
 | `opencood/tools/` | Training, checkpoint selection (`det_val_loss.py`), inference, Laplace and visualization scripts |
 | `metrics/` | Calibration, AUSE, sparsification and error-vs-variance tools |
 
-on Based Epistemic Uncertainty Estimation in 3D Object Detection" (CoRL 2022).
