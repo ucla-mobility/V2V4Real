@@ -1,36 +1,41 @@
-name: point_pillar_v2vnet_VN_NLL
+
+name: point_pillar_attfuse_MC_Exp1
 
 # ============================================================
-# DATASET
-# Use EXACTLY the same paths as successful V2VNet baseline
+# SOURCE DOMAIN: OPV2V
 # ============================================================
+
 root_dir: '/data/s3/aziya_master_workspace/opv2v_data/train'
 validate_dir: '/data/s3/aziya_master_workspace/opv2v_data/validate'
 
 dataset: opv2v
 
+yaml_parser: "load_point_pillar_params"
+
+
 # ============================================================
-# WILD / COMMUNICATION SETTINGS
-# Retained from V2V4Real-style baseline configuration
+# Communication / noise
 # ============================================================
+
 wild_setting:
   async: false
-  async_mode: 'real'
+  async_mode: 'sim'
   async_overhead: 100
   seed: 20
+
   loc_err: false
   xyz_std: 0.2
   ryp_std: 0.2
+
   data_size: 1.06
   transmission_speed: 27
   backbone_delay: 10
 
-yaml_parser: "load_point_pillar_params"
 
 # ============================================================
-# TRAINING
-# Same as successful hybrid V2VNet baseline
+# Training
 # ============================================================
+
 train_params:
   batch_size: &batch_size 4
   epoches: &epoches 60
@@ -38,32 +43,46 @@ train_params:
   save_freq: 1
   max_cav: &max_cav 5
 
+
 # ============================================================
-# FUSION DATASET
+# AttFuse / Intermediate Fusion
 # ============================================================
+
 fusion:
   core_method: 'IntermediateFusionDataset'
   args: []
 
+
 # ============================================================
-# PREPROCESSING
-# OPV2V geometry
+# Preprocessing
 # ============================================================
+
 preprocess:
   core_method: 'SpVoxelPreprocessor'
 
   args:
+
+    # Original V2V4Real AttFuse:
+    # [0.8, 0.8, 4]
+    #
+    # Hybrid:
+    # finer OPV2V voxelization
     voxel_size: &voxel_size [0.4, 0.4, 4]
+
     max_points_per_voxel: 32
     max_voxel_train: 32000
     max_voxel_test: 70000
 
-  cav_lidar_range: &cav_lidar [-140.8, -40, -3, 140.8, 40, 1]
+  cav_lidar_range: &cav_lidar
+    [-140.8, -40, -3, 140.8, 40, 1]
+
 
 # ============================================================
-# DATA AUGMENTATION
+# Augmentation
 # ============================================================
+
 data_augment:
+
   - NAME: random_world_flip
     ALONG_AXIS_LIST: ['x']
 
@@ -73,54 +92,65 @@ data_augment:
   - NAME: random_world_scaling
     WORLD_SCALE_RANGE: [0.95, 1.05]
 
+
 # ============================================================
-# POSTPROCESSING
-# Same as successful hybrid baseline
+# Postprocessing
 # ============================================================
+
 postprocess:
   core_method: 'VoxelPostprocessor'
 
   anchor_args:
     cav_lidar_range: *cav_lidar
+
     l: 3.9
     w: 1.6
     h: 1.56
+
     r: [0, 90]
-    feature_stride: 4
+
+    feature_stride: 2
+
     num: &achor_num 2
+
 
   target_args:
     pos_threshold: 0.6
     neg_threshold: 0.45
-    score_threshold: 0.20
+
+    # Keep low for cross-domain evaluation.
+    score_threshold: 0.2
+
 
   order: 'hwl'
-  max_num: 100
+
+  max_num: 120
+
   nms_thresh: 0.15
 
+
 # ============================================================
-# MODEL
-# Same hybrid V2VNet baseline architecture
-# + Variance Network
+# MODEL: PointPillar + AttFuse
 # ============================================================
+
 model:
-  core_method: point_pillar_v2vnet_VN
+  core_method: point_pillar_intermediate_MC
 
   args:
+    mc_dropout_p: 0.2
+
     voxel_size: *voxel_size
     lidar_range: *cav_lidar
+
     anchor_number: *achor_num
+    anchor_num: *achor_num
+
     max_cav: *max_cav
 
-    # Same as successful hybrid V2VNet baseline
-    compression: 32
-    backbone_fix: false
 
     # --------------------------------------------------------
-    # Variance Network sampling
-    # Keep if required by your VN implementation
+    # Pillar VFE
     # --------------------------------------------------------
-    num_bbox_samples: 10
 
     pillar_vfe:
       use_norm: true
@@ -128,74 +158,69 @@ model:
       use_absolute_xyz: true
       num_filters: [64]
 
+
+    # --------------------------------------------------------
+    # Scatter
+    # --------------------------------------------------------
+
     point_pillar_scatter:
       num_features: 64
 
+
+    # --------------------------------------------------------
+    # BEV Backbone
+    # --------------------------------------------------------
+
     base_bev_backbone:
+
       layer_nums: [3, 5, 8]
+
       layer_strides: [2, 2, 2]
+
       num_filters: [64, 128, 256]
+
       upsample_strides: [1, 2, 4]
+
       num_upsample_filter: [128, 128, 128]
 
-    shrink_header:
-      kernal_size: [3]
-      stride: [2]
-      padding: [1]
-      dim: [256]
-      input_dim: 384
+      compression: 0
 
-    # --------------------------------------------------------
-    # Hybrid V2VNet fusion configuration
-    # --------------------------------------------------------
-    v2vfusion:
-      use_temporal_encoding: true
-      voxel_size: *voxel_size
-      downsample_rate: 4
-      num_iteration: 1
-      in_channels: 256
-      gru_flag: true
-      agg_operator: "avg"
-
-      conv_gru:
-        H: 50
-        W: 176
-        num_layers: 1
-        kernel_size: [[3, 3]]
 
 # ============================================================
-# LOSS
-# VARIANCE NETWORK + NLL
+# Loss
 # ============================================================
+
 loss:
-  core_method: point_pillar_VN_loss_NLL
+  core_method: point_pillar_loss
 
   args:
     cls_weight: 1.0
     reg: 2.0
 
-    log_var_min: -7.0
-    log_var_max: 7.0
 
 # ============================================================
-# OPTIMIZER
-# Same as hybrid baseline
+# Optimizer
 # ============================================================
+
 optimizer:
   core_method: Adam
-  lr: 0.0002
+
+  # Keep AttFuse's established LR.
+  # Do NOT use F-Cooper's 0.0002.
+  lr: 0.001
 
   args:
     eps: 1e-10
     weight_decay: 1e-4
 
+
 # ============================================================
-# LR SCHEDULER
-# Same as hybrid baseline
+# Scheduler
 # ============================================================
+
 lr_scheduler:
-  core_method: cosineannealwarm
-  epoches: *epoches
-  warmup_lr: 2e-4
-  warmup_epoches: 10
-  lr_min: 2e-5
+  core_method: multistep
+  gamma: 0.1
+
+  # 60 epoch training
+  step_size: [30, 50]

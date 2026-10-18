@@ -143,7 +143,7 @@ class EnergyScoreLoss(nn.Module):
     """
 
     def __init__(self,
-                 num_samples=8,
+                 num_samples=32,
                  logvar_min=-7.0,
                  logvar_max=7.0):
 
@@ -158,9 +158,28 @@ class EnergyScoreLoss(nn.Module):
                 target,
                 logvar,
                 weights=None):
-
+        """
+        Returns a (B, N) loss. When weights are given, the score is only
+        computed on anchors with weight > 0 (the positives), which keeps
+        the S x S pairwise term cheap enough to use many samples.
+        """
         target = torch.where(torch.isnan(target), input, target)
 
+        if weights is None:
+            return self.energy_score(input, target, logvar)
+
+        mask = weights > 0
+        loss = input.new_zeros(weights.shape)
+        if mask.any():
+            loss[mask] = self.energy_score(input[mask],
+                                           target[mask],
+                                           logvar[mask]) * weights[mask]
+        return loss
+
+    def energy_score(self, input, target, logvar):
+        """
+        input, target, logvar: (..., 7). Returns the ES per box, shape (...).
+        """
         logvar = torch.clamp(
             logvar,
             self.logvar_min,
@@ -180,7 +199,7 @@ class EnergyScoreLoss(nn.Module):
         )
 
         samples = input.unsqueeze(0) + sigma.unsqueeze(0) * eps
-        # (S,B,N,7)
+        # (S,...,7)
 
         ###################################################
         # First ES term
@@ -197,29 +216,18 @@ class EnergyScoreLoss(nn.Module):
         # Second ES term
         ###################################################
 
-        S = samples.shape[0]
-
-        diff = samples.unsqueeze(0) - samples.unsqueeze(1)
-        pair_dist = diff.norm(dim=-1)  # [S, S, B, N]
-
-        mask = ~torch.eye(
-            S,
-            dtype=torch.bool,
-            device=samples.device
+        diff = (
+                samples.unsqueeze(0)
+                - samples.unsqueeze(1)
         )
 
-        term2 = pair_dist[mask]
-        term2 = term2.view(
-            S * (S - 1),
-            *pair_dist.shape[2:]
-        ).mean(dim=0)
+        # unbiased estimate of E||X-X'||: skip the S zero-distance
+        # diagonal pairs (i == j), otherwise sigma is pushed too small
+        S = samples.shape[0]
+        term2 = diff.norm(dim=-1)
+        term2 = term2.sum(dim=(0, 1)) / (S * (S - 1))
 
-        loss = term1 - 0.5 * term2
-
-        if weights is not None:
-            loss *= weights
-
-        return loss
+        return term1 - 0.5 * term2
 
 
 class PointPillarVNLossES(nn.Module):
@@ -229,10 +237,15 @@ class PointPillarVNLossES(nn.Module):
         logvar_min = args.get('log_var_min', -7.0)
         logvar_max = args.get('log_var_max', 7.0)
         self.energy_score_loss = EnergyScoreLoss(
-            num_samples=args.get("energy_num_samples", 8),
+            num_samples=args.get("energy_num_samples", 32),
             logvar_min=logvar_min,
             logvar_max=logvar_max
         )
+        # SmoothL1 keeps training the box mean exactly like the baseline;
+        # the energy score only trains the variance (on a detached mean),
+        # so uncertainty learning cannot degrade detection AP.
+        self.unc_weight = args.get('unc_weight', 1.0)
+        self.detach_mean = args.get('detach_mean', True)
         self.alpha = 0.25
         self.gamma = 2.0
 
@@ -298,22 +311,36 @@ class PointPillarVNLossES(nn.Module):
         box_preds_sin, reg_targets_sin = self.add_sin_difference(rm,
                                                                  targets)
 
-        # pure Gaussian NLL heteroscedastic regression loss
-        loc_loss_src = self.energy_score_loss(
-            box_preds_sin,
-            reg_targets_sin,
-            rm_logvar,
-            weights=reg_weights
-        )
-
+        # box mean: same SmoothL1 regression as the baseline
+        loc_loss_src = self.reg_loss_func(box_preds_sin,
+                                          reg_targets_sin,
+                                          weights=reg_weights)
         reg_loss = loc_loss_src.sum() / rm.shape[0]
         reg_loss *= self.reg_coe
 
-        total_loss = reg_loss + conf_loss
+        # variance: energy score around the (detached) predicted mean
+        # the sin-encoded yaw target also depends on the predicted angle,
+        # so both sides must be detached to keep this loss off the mean
+        if self.detach_mean:
+            mean_for_unc = box_preds_sin.detach()
+            target_for_unc = reg_targets_sin.detach()
+        else:
+            mean_for_unc, target_for_unc = box_preds_sin, reg_targets_sin
+        unc_loss_src = self.energy_score_loss(
+            mean_for_unc,
+            target_for_unc,
+            rm_logvar,
+            weights=reg_weights
+        )
+        unc_loss = unc_loss_src.sum() / rm.shape[0]
+        unc_loss *= self.unc_weight
+
+        total_loss = reg_loss + unc_loss + conf_loss
 
         self.loss_dict.update({
             'total_loss': total_loss,
             'reg_loss': reg_loss,
+            'unc_loss': unc_loss,
             'conf_loss': conf_loss,
             'avg_rm_logvar': rm_logvar.mean().item(),
             'mean_variance': torch.exp(rm_logvar).mean().item(),
@@ -426,6 +453,10 @@ class PointPillarVNLossES(nn.Module):
                           epoch*batch_len + batch_id)
         if avg_rm_logvar is not None:
             writer.add_scalar('Avg_reg_logvar', avg_rm_logvar,
+                              epoch*batch_len + batch_id)
+        if 'unc_loss' in self.loss_dict:
+            writer.add_scalar('Uncertainty_loss',
+                              self.loss_dict['unc_loss'].item(),
                               epoch*batch_len + batch_id)
 
     def logging_da(self, epoch, batch_id, batch_len, writer, da_loss, pbar=None):

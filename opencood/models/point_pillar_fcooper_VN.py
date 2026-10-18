@@ -44,6 +44,11 @@ class PointPillarFCooperVN(nn.Module):
         nn.init.constant_(self.reg_var_head.weight, 0.0)
         nn.init.constant_(self.reg_var_head.bias, -2.0)
 
+        # Optional: train the variance head on detached features, so the
+        # uncertainty loss cannot change the shared backbone (detection
+        # training then equals the baseline). Default off = old behaviour.
+        self.detach_var_input = args.get('detach_var_input', False)
+
         if args['backbone_fix']:
             self.backbone_fix()
 
@@ -109,7 +114,8 @@ class PointPillarFCooperVN(nn.Module):
 
         psm = self.cls_head(fused_feature)
         rm = self.reg_head(fused_feature)
-        rm_logvar = self.reg_var_head(fused_feature)
+        var_input = fused_feature.detach() if self.detach_var_input else fused_feature
+        rm_logvar = self.reg_var_head(var_input)
 
         output_dict = {'psm': psm, 'rm': rm, 'rm_logvar': rm_logvar}
 

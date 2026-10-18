@@ -11,6 +11,10 @@ from opencood.models.mwin_tranformer import V2XTransformer
 
 
 class PointPillarTransformerMC(nn.Module):
+    """V2X-ViT with one MC-dropout layer on the fused feature before the heads
+    (same design as point_pillar_fcooper_MC). Note: the V2X-ViT fusion has its
+    own dropout layers (dropout in the config); inference_mc.py only switches on
+    the layer named 'mc_dropout' at test time."""
     def __init__(self, args):
         super(PointPillarTransformerMC, self).__init__()
 
@@ -34,7 +38,9 @@ class PointPillarTransformerMC(nn.Module):
             self.naive_compressor = NaiveCompressor(256, args['compression'])
 
         self.fusion_net = V2XTransformer(args['transformer'])
-        self.mc_dropout = nn.Dropout(p=0.7)
+        self.mc_dropout = nn.Dropout(
+            p=args.get('mc_dropout_p', 0.2)
+        )
 
         self.cls_head = nn.Conv2d(128 * 2, args['anchor_number'],
                                   kernel_size=1)

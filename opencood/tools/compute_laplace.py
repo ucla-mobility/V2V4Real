@@ -100,12 +100,27 @@ def parse_args():
         default="heads",
         choices=[
             "heads",
+            "last_module",
             "full",
         ],
         help=(
-            "Parameters included in the Laplace approximation. "
-            "'heads' selects cls_head and reg_head. "
-            "'full' selects the entire detector."
+            "Parameters included in the Laplace approximation "
+            "(BatchNorm never included). "
+            "'heads': cls_head and reg_head (last layer). "
+            "'last_module': last block before the heads + heads "
+            "(F-Cooper / V2VNet / V2X-ViT: shrink_conv; AttFuse: "
+            "backbone.deblocks). "
+            "'full': the entire detector."
+        ),
+    )
+    parser.add_argument(
+        "--scope_modules",
+        default=None,
+        type=str,
+        help=(
+            "Comma-separated module prefixes that override --param_scope, "
+            "e.g. 'backbone.deblocks,backbone.fuse_modules,cls_head,reg_head'. "
+            "Use the same value in inference_laplace.py."
         ),
     )
 
@@ -120,12 +135,51 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--batch_size",
+        "--curvature",
         default=None,
+        choices=["ggn", "sampled_fisher", "ef"],
+        help=(
+            "'ggn': exact diagonal generalized Gauss-Newton, heads only "
+            "(default for --param_scope heads). 'sampled_fisher': diagonal "
+            "Fisher with labels sampled from the model, any scope (default "
+            "otherwise); unbiased estimate of the same GGN. 'ef': empirical "
+            "Fisher of the detector loss (collapses with focal loss)."
+        ),
+    )
+
+    parser.add_argument(
+        "--fisher_samples",
+        default=1,
+        type=int,
+        help="Label samples per frame for --curvature sampled_fisher.",
+    )
+
+    parser.add_argument(
+        "--noise_frames",
+        default=500,
         type=int,
         help=(
-            "Optional batch-size override. "
-            "If omitted, use the value from the YAML configuration."
+            "Random training frames for the regression-noise pre-pass "
+            "(--curvature sampled_fisher)."
+        ),
+    )
+
+    parser.add_argument(
+        "--seed",
+        default=0,
+        type=int,
+        help="Seed for label sampling (--curvature sampled_fisher).",
+    )
+
+    parser.add_argument(
+        "--train_dataset",
+        default="opv2v",
+        type=str,
+        help=(
+            "Value of the config 'dataset' field used for the curvature pass. "
+            "The model was trained on OPV2V, but its config.yaml may already "
+            "be edited to v2v4real for testing; 'opv2v' switches the dataset "
+            "code back to the simulation (training) coordinate handling."
         ),
     )
 
@@ -233,6 +287,16 @@ def main():
         args
     )
 
+    # Curvature is a property of the TRAINING data: make sure the training
+    # dataset is read with the training-domain settings.
+    if hypes.get("dataset") != args.train_dataset:
+        print(
+            f"[Laplace] config dataset '{hypes.get('dataset')}' -> "
+            f"'{args.train_dataset}' for the curvature pass"
+        )
+        hypes["dataset"] = args.train_dataset
+    print(f"[Laplace] Training data: {hypes['root_dir']}")
+
     # -------------------------------------------------------------
     # Build TRAINING dataset
     # -------------------------------------------------------------
@@ -251,21 +315,11 @@ def main():
         train=True,
     )
 
-    if args.batch_size is not None:
-
-        batch_size = args.batch_size
-
-    else:
-
-        batch_size = hypes[
-            "train_params"
-        ].get(
-            "batch_size",
-            1,
-        )
+    # Per-example gradients are required for the empirical Fisher.
+    batch_size = 1
 
     print(
-        f"[Laplace] Batch size: {batch_size}"
+        f"[Laplace] Batch size: {batch_size} (per-example gradients)"
     )
 
     # OpenCOOD datasets provide their own collate function.
@@ -355,23 +409,10 @@ def main():
     # Select Laplace parameter scope
     # -------------------------------------------------------------
 
-    if args.param_scope == "heads":
-
-        param_scope = (
-            "cls_head",
-            "reg_head",
-        )
-
-    elif args.param_scope == "full":
-
-        param_scope = "full"
-
-    else:
-
-        raise ValueError(
-            f"Unsupported param_scope: "
-            f"{args.param_scope}"
-        )
+    param_scope = args.param_scope
+    heads_only = param_scope == "heads" and not args.scope_modules
+    if args.curvature is None:
+        args.curvature = "ggn" if heads_only else "sampled_fisher"
 
     print(
         f"\n[Laplace] Parameter scope: "
@@ -386,6 +427,7 @@ def main():
         model=model,
         param_scope=param_scope,
         device=device,
+        scope_modules=args.scope_modules,
     )
 
     # -------------------------------------------------------------
@@ -431,12 +473,39 @@ def main():
             device
         )
 
-    laplace_model.fit_empirical_diag(
-        train_loader=train_loader,
-        criterion=criterion,
-        to_device_fn=to_device_fn,
-        max_batches=args.max_batches,
-    )
+    loss_args = hypes.get("loss", {}).get("args", {})
+    print(f"[Laplace] Curvature: {args.curvature}")
+    if args.curvature == "ggn":
+        if args.param_scope != "heads":
+            raise ValueError("--curvature ggn supports --param_scope heads only")
+        laplace_model.fit_ggn_diag(
+            train_loader=train_loader,
+            to_device_fn=to_device_fn,
+            max_batches=args.max_batches,
+            n_data=len(train_dataset),
+            logvar_min=loss_args.get("log_var_min", -7.0),
+            logvar_max=loss_args.get("log_var_max", 7.0),
+        )
+    elif args.curvature == "sampled_fisher":
+        laplace_model.fit_sampled_fisher_diag(
+            train_loader=train_loader,
+            to_device_fn=to_device_fn,
+            max_batches=args.max_batches,
+            n_data=len(train_dataset),
+            n_samples=args.fisher_samples,
+            noise_frames=args.noise_frames,
+            logvar_min=loss_args.get("log_var_min", -7.0),
+            logvar_max=loss_args.get("log_var_max", 7.0),
+            seed=args.seed,
+        )
+    else:
+        laplace_model.fit_empirical_diag(
+            train_loader=train_loader,
+            criterion=criterion,
+            to_device_fn=to_device_fn,
+            max_batches=args.max_batches,
+            n_data=len(train_dataset),
+        )
 
     # -------------------------------------------------------------
     # Output path

@@ -11,6 +11,8 @@ from opencood.models.mwin_tranformer import V2XTransformer
 
 
 class PointPillarTransformerVN(nn.Module):
+    """V2X-ViT with a heteroscedastic regression variance head
+    (same design as point_pillar_fcooper_VN)."""
     def __init__(self, args):
         super(PointPillarTransformerVN, self).__init__()
 
@@ -39,9 +41,9 @@ class PointPillarTransformerVN(nn.Module):
                                   kernel_size=1)
         self.reg_head = nn.Conv2d(128 * 2, 7 * args['anchor_number'],
                                   kernel_size=1)
+        # Predict per-box-parameter log variance: s = log(sigma^2).
         self.reg_var_head = nn.Conv2d(128 * 2, 7 * args['anchor_number'],
                                       kernel_size=1)
-
         nn.init.constant_(self.reg_var_head.weight, 0.0)
         nn.init.constant_(self.reg_var_head.bias, -2.0)
 
