@@ -215,21 +215,4 @@ Main findings:
 | `opencood/tools/` | Training, checkpoint selection (`det_val_loss.py`), inference, Laplace and visualization scripts |
 | `metrics/` | Calibration, AUSE, sparsification and error-vs-variance tools |
 
-## Citation
-
-If you use the dataset or the base code, please cite the original V2V4Real paper:
-
-```bibtex
-@inproceedings{xu2023v2v4real,
-  title={V2V4Real: A Real-world Large-scale Dataset for Vehicle-to-Vehicle Cooperative Perception},
-  author={Xu, Runsheng and Xia, Xin and Li, Jinlong and Li, Hanzhao and Zhang, Shuo and Tu, Zhengzhong and Meng, Zonglin and Xiang, Hao and Dong, Xiaoyu and Song, Rui and Yu, Hongkai and Zhou, Bolei and Ma, Jiaqi},
-  booktitle={The IEEE/CVF Computer Vision and Pattern Recognition Conference (CVPR)},
-  year={2023}
-}
-```
-
-## Acknowledgment
-
-Based on [V2V4Real](https://github.com/ucla-mobility/V2V4Real) and [OpenCOOD](https://github.com/DerrickXuNu/OpenCOOD)
-by the UCLA Mobility Lab. The Laplace part follows Daxberger et al., "Laplace Redux" (NeurIPS 2021), and Yun & Liu,
-"Laplace Approximation Based Epistemic Uncertainty Estimation in 3D Object Detection" (CoRL 2022).
+on Based Epistemic Uncertainty Estimation in 3D Object Detection" (CoRL 2022).
